@@ -1,8 +1,13 @@
 import numpy as np
-from sigconfide.utils.utils import is_wholenumber, FrobeniusNorm
-from sigconfide.decompose.qp import decomposeQP
+from sigconfide.utils.utils import is_wholenumber, FrobeniusNorm, kl_divergence
 
-def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=decomposeQP):
+# Try to import decomposeQP, but don't fail if it's missing (allows testing without quadprog)
+try:
+    from sigconfide.decompose.qp import decomposeQP
+except ImportError:
+    decomposeQP = None
+
+def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=None):
     """
     Obtain the bootstrap distribution of signature exposures for a tumor sample.
 
@@ -21,9 +26,10 @@ def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=dec
             It should be a function. Default is 'decomposeQP'.
 
     Returns:
-        tuple: A tuple containing two numpy arrays.
+        tuple: A tuple containing three numpy arrays.
             - exposures (numpy.ndarray): Matrix of signature exposures for each bootstrap replicate (column).
             - errors (numpy.ndarray): Estimation error for each bootstrap replicate (Frobenius norm).
+            - kl_errors (numpy.ndarray): Estimation error for each bootstrap replicate (KL divergence).
 
     Raises:
         ValueError: If the length of vector 'm' and the number of rows of matrix 'P' do not match,
@@ -65,8 +71,20 @@ def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=dec
     ])
     exposures = exposures / np.sum(exposures, axis=0)  # Normalize exposures
 
-    # Compute estimation error for each replicate/trial (Frobenius norm)
+    # Compute estimation error for each replicate/trial
     # G x R
     errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
+    
+    # Compute KL divergence error for each replicate
+    # We do a matrix multiply to get the approximated mutation spectra for all R replicates at once
+    # M_approx shape: (K, R)
+    m_approx = P @ exposures
+    
+    # Calculate KL divergence across the columns (axis=0) against the original normalized m
+    # Vectorized formula since m is constant
+    eps = 1e-10
+    m_expanded = m[:, np.newaxis]
+    kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
+    kl_errors = np.sum(kl_matrix, axis=0)
 
-    return exposures, errors
+    return exposures, errors, kl_errors

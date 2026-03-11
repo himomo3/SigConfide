@@ -4,6 +4,13 @@ import os
 def FrobeniusNorm(M, P, E):
     return np.sqrt(np.sum((M - np.dot(P, E))**2))
 
+def kl_divergence(m, m_approx):
+    """Calculate the generalized Kullback-Leibler divergence for Poisson data."""
+    m = np.asarray(m)
+    m_approx = np.asarray(m_approx)
+    eps = 1e-10
+    return np.sum(m * np.log((m + eps) / (m_approx + eps)) - m + m_approx)
+
 
 def is_wholenumber(x, tol=1e-15):
     return np.abs(x - np.round(x)) < tol

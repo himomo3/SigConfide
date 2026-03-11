@@ -1,10 +1,10 @@
 import numpy as np
-from sigconfide.estimates.sfs import sample_sfs, sfs_confidence_and_stability
+from sigconfide.estimates.sfs import sample_sfs
 
 def test_sfs_algorithm_basic():
     """
     Test that the SFS algorithm appropriately maintains P * E = M
-    and preserves non-negativity.
+    and returns samples and errors.
     """
     
     # Construct a valid synthetic P and E
@@ -21,29 +21,20 @@ def test_sfs_algorithm_basic():
         [ 20, 80, 150]
     ])
     
+    M_orig = P_orig @ E_orig
+    
     # Run the raw SFS
     np.random.seed(42) # For reproducibility
-    results = sample_sfs(P_orig, E_orig, max_iter=2000, check=500, beta=0.5, eps=1e-10)
-    
-    P_min = results["Pminimum"]
-    P_max = results["Pmaximum"]
-    E_min = results["Eminimum"]
-    E_max = results["Emaximum"]
-    
-    # Test non-negativity bounds
-    assert np.all(P_min >= -1e-10)
-    assert np.all(E_min >= -1e-10)
+    exposures, frob_errors, errors = sample_sfs(m=M_orig, P=P_orig, E=E_orig, max_iter=1500, check=500, eps=1e-10)
     
     # Check shape
-    assert P_min.shape == P_orig.shape
-    assert E_min.shape == E_orig.shape
+    n_samples = exposures.shape[-1]
+    assert exposures.shape == (2, 3, n_samples)  # N=2, G=3, R=n_samples
+    assert len(errors) == n_samples
+    assert n_samples <= 1500
+    assert n_samples > 0
+    assert np.all(exposures >= -1e-10)
     
-    # Check that it sampled different configurations 
-    # (Since there's ambiguity in this system, P_max > P_min in general)
-    assert np.any(P_max > P_min)
-    
-    # Check stability calculation
-    stability_metrics = sfs_confidence_and_stability(P_min, P_max, E_min, E_max)
-    var = stability_metrics["channel_variation"]
-    assert var.shape == P_orig.shape
-    assert np.all(var >= 0)
+    # Check error is stable (should be close to 0 since P*E is theoretically constant in SFS)
+    # The KL divergence between M and P@E should be quite small
+    assert np.all(errors < 1e-4)

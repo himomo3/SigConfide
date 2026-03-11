@@ -1,5 +1,5 @@
 import numpy as np
-
+from sigconfide.utils.utils import kl_divergence, FrobeniusNorm
 def _amat(lambda_val, s, smix, N):
     """
     Creates the transformation matrix given lambda, two signature indices s and smix, and dimension N.
@@ -37,7 +37,7 @@ def _lambda_range(P, E, s, smix):
         
     return lmin, lmax
 
-def sample_sfs(P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
+def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     """
     Finds the Set of Feasible Solutions (SFS) from a given solution of matrices P and E.
     
@@ -45,6 +45,7 @@ def sample_sfs(P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     of an NMF solution without changing the product P * E.
     
     Parameters:
+        m (numpy.ndarray): Observed tumor profile vector/matrix.
         P (numpy.ndarray): Signature matrix (K x N), e.g., 96 mutation types by N signatures.
         E (numpy.ndarray): Exposure matrix (N x G), e.g., N signatures by G patients.
         max_iter (int): Maximum number of iterations for the sampling algorithm.
@@ -53,13 +54,10 @@ def sample_sfs(P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
         eps (float): Epsilon for the stopping criteria based on average change.
         
     Returns:
-        dict: A dictionary containing the SFS findings:
-            - "avgChangeFinal": The final average change metric.
-            - "totalIter": The number of iterations completed.
-            - "Pminimum": Minimum sampled values for each entry in P.
-            - "Pmaximum": Maximum sampled values for each entry in P.
-            - "Eminimum": Minimum sampled values for each entry in E.
-            - "Emaximum": Maximum sampled values for each entry in E.
+        tuple: A tuple containing three numpy arrays.
+            - exposures (numpy.ndarray): Matrix of signature exposures for each sample.
+            - frob_errors (numpy.ndarray): Estimation error (Frobenius norm).
+            - errors (numpy.ndarray): Estimation error (KL divergence).
     """
     
     # Ensure working copies to prevent modifying strictly read-only inputs
@@ -67,26 +65,33 @@ def sample_sfs(P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     E_current = np.copy(E).astype(np.float64)
     
     K, N = P_current.shape
+    
+    is_1d = False
+    if E_current.ndim == 1:
+        E_current = E_current.reshape(N, -1)
+        is_1d = True
+        
     _, G = E_current.shape
     
-    # Track the extremes
-    P_min = np.copy(P_current)
-    P_max = np.copy(P_current)
-    E_min = np.copy(E_current)
-    E_max = np.copy(E_current)
+    m_current = np.copy(m).astype(np.float64)
+    if m_current.ndim == 1:
+        m_current = m_current.reshape(K, -1)
+    
+    all_E = []
+    all_errors = []
+    all_frob_errors = []
     
     # Matrices to store histories during the checking window
     p_history = np.zeros((check + 1, K, N))
-    e_history = np.zeros((check + 1, N, G))
-    
     diffnew = 1.0
     diffold = 0.0
+    
+    P_min = np.copy(P_current)
+    P_max = np.copy(P_current)
     
     # Initial cleanup to avoid numeric issues around 0
     P_current[P_current < 1e-10] = 0
     E_current[E_current < 1e-10] = 0
-    
-    total_iter = 0
     
     for i in range(max_iter):
         # We cycle through all columns (signatures) in one pass
@@ -97,119 +102,68 @@ def sample_sfs(P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
                 
             lmin, lmax = _lambda_range(P_current, E_current, s, smix)
             
-            # Sample mixing proportion from Beta distribution
-            # Instead of raw gamma draws like in cpp, we can just draw from Beta directly
-            # The cpp did: gvar = randg(2, beta, 1.0); x = gvar[0]/sum(gvar); which is exactly Beta(beta, beta)
             x = np.random.beta(beta, beta)
-            
             lambda_val = lmin * x + lmax * (1 - x)
             
             if abs(lambda_val) > 1e-10 and (1.0 - lambda_val) != 0.0:
                 # Update P
-                # A[s,s] = 1-lambda, A[smix,s] = lambda
-                # P = P * A
-                # This only affects column s of P
                 p_s_new = P_current[:, s] * (1.0 - lambda_val) + P_current[:, smix] * lambda_val
                 
                 # Update E
-                # E = A^-1 * E
-                # A^-1 has (s,s) = 1/(1-lambda) and (smix,s) = -lambda/(1-lambda)
-                # This only affects row s of E
-                e_s_new = E_current[s, :] * (1.0 / (1.0 - lambda_val)) + E_current[smix, :] * (-lambda_val / (1.0 - lambda_val))
+                # Ainv has Ainv[s,s] = 1/(1-lambda), Ainv[smix,s] = -lambda/(1-lambda)
+                # So Row s becomes 1/(1-lambda) * Row s
+                # Row smix becomes Row smix + -lambda/(1-lambda) * Row s
+                e_s_new = E_current[s, :] * (1.0 / (1.0 - lambda_val))
+                e_smix_new = E_current[smix, :] + E_current[s, :] * (-lambda_val / (1.0 - lambda_val))
                 
                 P_current[:, s] = p_s_new
                 E_current[s, :] = e_s_new
+                E_current[smix, :] = e_smix_new
                 
                 # Clean small numeric errors
                 P_current[:, s][P_current[:, s] < 1e-10] = 0
                 E_current[s, :][E_current[s, :] < 1e-10] = 0
+                E_current[smix, :][E_current[smix, :] < 1e-10] = 0
+        
+        m_approx = np.dot(P_current, E_current)
+        err = kl_divergence(m_current, m_approx)
+        frob_err = FrobeniusNorm(m_current, P_current, E_current)
+        
+        all_E.append(np.copy(E_current))
+        all_errors.append(err)
+        all_frob_errors.append(frob_err)
         
         # Store state in history for this check period
         iter_mod = i % check
         p_history[iter_mod] = P_current
-        e_history[iter_mod] = E_current
         
         # Check convergence metrics at the end of a check block
         if i > 0 and iter_mod == check - 1:
-            # Add previous check period's min/max as the first element of history to compare against
             p_history[-1] = P_min
-            e_history[-1] = E_min
-            
-            # Update global min/max across this batch
             P_min_batch = np.min(p_history, axis=0)
-            P_max_batch = np.max(p_history, axis=0)
             
-            # Replace the -1 index with current maxes to compute global rolling max
             p_history[-1] = P_max
             P_max_batch = np.max(p_history, axis=0)
             
-            E_min_batch = np.min(e_history, axis=0)
-            E_max_batch = np.max(e_history, axis=0)
-            
-            # Replace the -1 index with current maxes to compute global rolling max
-            e_history[-1] = E_max
-            E_max_batch = np.max(e_history, axis=0)
-            
-            # Compute range (max - min) for each entry in P across this batch to find variation
-            # We want the max variation across the history we just captured to measure if things are still expanding
             prob_diff = np.ptp(p_history[:-1], axis=0)
             diffnew = np.mean(prob_diff)
             
-            # Commit new global min/max bounds
             P_min = P_min_batch
             P_max = P_max_batch
-            E_min = E_min_batch
-            E_max = E_max_batch
             
             if (diffnew - diffold) < eps:
-                total_iter = i + 1
                 break
             else:
                 diffold = diffnew
                 
-        total_iter = i + 1
-
-    return {
-        "avgChangeFinal": diffnew,
-        "totalIter": total_iter,
-        "Pminimum": P_min,
-        "Pmaximum": P_max,
-        "Eminimum": E_min,
-        "Emaximum": E_max
-    }
-
-def sfs_confidence_and_stability(P_min, P_max, E_min, E_max):
-    """
-    Analyzes the output of sample_sfs to determine signature stability and exposure confidence.
+    exposures = np.stack(all_E, axis=-1)
     
-    Parameters:
-        P_min (numpy.ndarray): Minimum signature profiles (K x N).
-        P_max (numpy.ndarray): Maximum signature profiles (K x N).
-        E_min (numpy.ndarray): Minimum exposures (N x G).
-        E_max (numpy.ndarray): Maximum exposures (N x G).
-        
-    Returns:
-        dict:
-            - "signature_variation": The normalized variation for each entry in P to identify unstable signatures.
-            - "exposure_confidence_bounds": (min, max) range of exposure for each signature in each sample.
-    """
-    K, N = P_min.shape
-    
-    # Calculate geometric mean or arithmetic mean as a denominator
-    # For numeric stability, add small epsilon
-    P_mean = (P_max + P_min) / 2.0 + 1e-12
-    
-    # Variation in P (max spread normalized by mean presence)
-    variation = (P_max - P_min) / P_mean
-    
-    # We could aggregate this variation per signature by averaging over mutation types
-    # Higher values indicate more instability due to non-uniqueness
-    signature_variability = np.mean(variation, axis=0)
-    
-    # For exposures, we provide the raw intervals 
-    # E_min indicates the lower bound. If a signature's e_min > 0, we're confident it's present.
-    return {
-        "signature_instability_score": signature_variability,  # Array of length N
-        "channel_variation": variation,  # K x N
-        "E_bounds": (E_min, E_max)       # Tuple of arrays N x G
-    }
+    if is_1d or G == 1:
+        # squeeze the middle dimension so it becomes (N, R)
+        if exposures.ndim == 3 and exposures.shape[1] == 1:
+            exposures = np.squeeze(exposures, axis=1)
+            
+    errors = np.array(all_errors)
+    frob_errors = np.array(all_frob_errors)
+            
+    return exposures, frob_errors, errors
