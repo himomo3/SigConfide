@@ -54,8 +54,9 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
         eps (float): Epsilon for the stopping criteria based on average change.
         
     Returns:
-        tuple: A tuple containing three numpy arrays.
+        tuple: A tuple containing four numpy arrays.
             - exposures (numpy.ndarray): Matrix of signature exposures for each sample.
+            - signatures (numpy.ndarray): Stacked signature matrices corresponding to the exposures.
             - frob_errors (numpy.ndarray): Estimation error (Frobenius norm).
             - errors (numpy.ndarray): Estimation error (KL divergence).
     """
@@ -78,6 +79,7 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
         m_current = m_current.reshape(K, -1)
     
     all_E = []
+    all_P = []
     all_errors = []
     all_frob_errors = []
     
@@ -130,6 +132,7 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
         frob_err = FrobeniusNorm(m_current, P_current, E_current)
         
         all_E.append(np.copy(E_current))
+        all_P.append(np.copy(P_current))
         all_errors.append(err)
         all_frob_errors.append(frob_err)
         
@@ -157,6 +160,7 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
                 diffold = diffnew
                 
     exposures = np.stack(all_E, axis=-1)
+    signatures = np.stack(all_P, axis=-1)
     
     if is_1d or G == 1:
         # squeeze the middle dimension so it becomes (N, R)
@@ -166,4 +170,4 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     errors = np.array(all_errors)
     frob_errors = np.array(all_frob_errors)
             
-    return exposures, frob_errors, errors
+    return exposures, signatures, frob_errors, errors

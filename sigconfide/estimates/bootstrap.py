@@ -41,50 +41,85 @@ def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=Non
         bootstrapSigExposures(tumorBRCA[:, 1], signaturesCOSMIC[:, sigsBRCA], 10, 1000, decomposeQP)
     """
 
-    if len(m) != P.shape[0]:
-        raise ValueError("Length of vector 'm' and number of rows of matrix 'P' must be the same.")
+    is_2d = m.ndim == 2 and m.shape[1] > 1
     if m.shape[0] != P.shape[0]:
-        raise ValueError("Elements of vector 'm' and rows of matrix 'P' must have the same names (mutations types).")
-    if P.shape[1] == 1:
-        raise ValueError("Matrices 'P' must have at least 2 columns (signatures).")
+        raise ValueError("Rows of matrix 'm' and rows of matrix 'P' must be the same.")
 
-    # If 'mutation_count' is not specified, 'm' has to contain counts
-    if mutation_count is None:
-        if all(is_wholenumber(val) for val in m):
-            mutation_count = int(m.sum())
+    K = m.shape[0]  # number of mutation types
+    
+    if is_2d:
+        G = m.shape[1]
+        if mutation_count is None:
+            mutation_count = []
+            for g in range(G):
+                if all(is_wholenumber(val) for val in m[:, g]):
+                    mutation_count.append(int(m[:, g].sum()))
+                else:
+                    raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
         else:
-            raise ValueError("Please specify the parameter 'mutation_count' in the function call or provide mutation counts in parameter 'm'.")
+            if isinstance(mutation_count, (int, float, np.integer)):
+                mutation_count = [int(mutation_count)] * G
 
-    # Normalize m to be a vector of probabilities.
-    m = m / np.sum(m)
+        m = m / m.sum(axis=0)
+        
+        def bootstrap_sample_col(m_col, mc, K):
+            mutations_sampled = np.random.choice(K, size=mc, p=m_col)
+            return np.bincount(mutations_sampled, minlength=K) / mc
+            
+        exposures_all = []
+        errors_all = []
+        kl_errors_all = []
+        
+        for g in range(G):
+            exposures_g = np.column_stack([
+                decomposition_method(bootstrap_sample_col(m[:, g], mutation_count[g], K), P) for _ in range(R)
+            ])
+            # normalize sum
+            expos_sum = np.sum(exposures_g, axis=0)
+            expos_sum[expos_sum == 0] = 1.0 # prevent division by zero
+            exposures_g = exposures_g / expos_sum
+            
+            errors_g = np.vectorize(lambda i: FrobeniusNorm(m[:, g], P, exposures_g[:, i]))(range(exposures_g.shape[1]))
+            
+            m_approx = P @ exposures_g
+            eps = 1e-10
+            m_expanded = m[:, g][:, np.newaxis]
+            kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
+            kl_errors_g = np.sum(kl_matrix, axis=0)
+            
+            exposures_all.append(exposures_g)
+            errors_all.append(errors_g)
+            kl_errors_all.append(kl_errors_g)
+            
+        exposures = np.stack(exposures_all, axis=1) # (N, G, R)
+        errors = np.stack(errors_all, axis=0)       # (G, R)
+        kl_errors = np.stack(kl_errors_all, axis=0) # (G, R)
+        
+    else:
+        m = m.flatten()
+        if mutation_count is None:
+            if all(is_wholenumber(val) for val in m):
+                mutation_count = int(m.sum())
+            else:
+                raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
 
-    # Find optimal solutions using provided decomposition method for each bootstrap replicate
-    # Matrix of signature exposures per replicate (column)
-    K = len(m)  # number of mutation types
+        m = m / np.sum(m)
 
-    def bootstrap_sample(m, mutation_count, K):
-        mutations_sampled = np.random.choice(K, size=mutation_count, p=m)
-        return np.bincount(mutations_sampled, minlength=K) / mutation_count
+        def bootstrap_sample(m, mutation_count, K):
+            mutations_sampled = np.random.choice(K, size=mutation_count, p=m)
+            return np.bincount(mutations_sampled, minlength=K) / mutation_count
 
-    exposures = np.column_stack([
-        decomposition_method(bootstrap_sample(m, mutation_count, K), P) for _ in range(R)
-    ])
-    exposures = exposures / np.sum(exposures, axis=0)  # Normalize exposures
+        exposures = np.column_stack([
+            decomposition_method(bootstrap_sample(m, mutation_count, K), P) for _ in range(R)
+        ])
+        exposures = exposures / np.sum(exposures, axis=0)
 
-    # Compute estimation error for each replicate/trial
-    # G x R
-    errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
-    
-    # Compute KL divergence error for each replicate
-    # We do a matrix multiply to get the approximated mutation spectra for all R replicates at once
-    # M_approx shape: (K, R)
-    m_approx = P @ exposures
-    
-    # Calculate KL divergence across the columns (axis=0) against the original normalized m
-    # Vectorized formula since m is constant
-    eps = 1e-10
-    m_expanded = m[:, np.newaxis]
-    kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
-    kl_errors = np.sum(kl_matrix, axis=0)
+        errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
+        
+        m_approx = P @ exposures
+        eps = 1e-10
+        m_expanded = m[:, np.newaxis]
+        kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
+        kl_errors = np.sum(kl_matrix, axis=0)
 
     return exposures, errors, kl_errors

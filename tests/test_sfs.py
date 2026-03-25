@@ -25,7 +25,7 @@ def test_sfs_algorithm_basic():
     
     # Run the raw SFS
     np.random.seed(42) # For reproducibility
-    exposures, frob_errors, errors = sample_sfs(m=M_orig, P=P_orig, E=E_orig, max_iter=1500, check=500, eps=1e-10)
+    exposures, signatures, frob_errors, errors = sample_sfs(m=M_orig, P=P_orig, E=E_orig, max_iter=1500, check=500, eps=1e-10)
     
     # Check shape
     n_samples = exposures.shape[-1]
