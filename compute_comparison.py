@@ -6,7 +6,7 @@ import numpy as np
 
 from sigconfide.utils.utils import load_samples_file, load_signatures_file, kl_divergence, FrobeniusNorm
 from sigconfide.estimates.bootstrap import bootstrapSigExposures
-from sigconfide.estimates.sfs import sample_sfs
+from sigconfide.estimates.sfs import sample_sfs, bootstrap_sfs
 from sigconfide.estimates.standard import findSigExposures
 from sigconfide.decompose.qp import decomposeQP
 
@@ -72,10 +72,10 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
         t1_boot = time.time()
         print(f"  [Bootstrap completed in {t1_boot - t0_boot:.2f} seconds]")
         
-        print("  Running SFS...")
+        print("  Running bootstrap SFS...")
         t0_sfs = time.time()
-        E_sfs_whole, P_sfs_whole, frob_errors_sfs_whole, kl_errors_sfs_whole = sample_sfs(
-            M_norm, P, E_opt_whole_all, max_iter=20000, check=500, eps=1e-8
+        E_sfs_whole, P_sfs_whole, frob_errors_sfs_whole, kl_errors_sfs_whole = bootstrap_sfs(
+            M_norm, P, E_opt_whole_all, R=10, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-8
         )
         t1_sfs = time.time()
         print(f"  [SFS completed in {t1_sfs - t0_sfs:.2f} seconds]")
@@ -135,8 +135,10 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
                 m, P, R_boot, mutation_count=mutation_count, decomposition_method=decomposeQP
             )
             
-            print(f"  Running SFS...")
-            E_sfs, P_sfs, frob_errors_sfs, kl_errors_sfs = sample_sfs(m_norm, P, E_opt, max_iter=20000, check=500, eps=1e-8)
+            print(f"  Running bootstrap SFS...")
+            E_sfs, P_sfs, frob_errors_sfs, kl_errors_sfs = bootstrap_sfs(
+                m_norm, P, E_opt, R=10, mutation_count=mutation_count, decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-8
+            )
         
         if len(kl_errors_sfs) == 0:
             print(f"  SFS generated no samples for {pt}.")

@@ -171,3 +171,40 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     frob_errors = np.array(all_frob_errors)
             
     return exposures, signatures, frob_errors, errors
+
+def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
+    """
+    Combines bootstrap and SFS methods by generating bootstrap replicates of exposures
+    and running SFS on each replicate.
+    """
+    from sigconfide.estimates.bootstrap import bootstrapSigExposures
+
+    E_boot, _, _ = bootstrapSigExposures(m, P, R, mutation_count=mutation_count, decomposition_method=decomposition_method)
+
+    all_E = []
+    all_P = []
+    all_frob_errors = []
+    all_errors = []
+
+    for r in range(R):
+        if E_boot.ndim == 3:
+            E_r = E_boot[:, :, r]
+        else:
+            E_r = E_boot[:, r]
+
+        exposures_r, signatures_r, frob_errors_r, errors_r = sample_sfs(
+            m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps
+        )
+
+        all_E.append(exposures_r)
+        all_P.append(signatures_r)
+        all_frob_errors.append(frob_errors_r)
+        all_errors.append(errors_r)
+
+    # Concatenate the results from all replicates
+    final_exposures = np.concatenate(all_E, axis=-1)
+    final_signatures = np.concatenate(all_P, axis=-1)
+    final_frob_errors = np.concatenate(all_frob_errors, axis=-1)
+    final_errors = np.concatenate(all_errors, axis=-1)
+
+    return final_exposures, final_signatures, final_frob_errors, final_errors
