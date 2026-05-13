@@ -170,7 +170,16 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     errors = np.array(all_errors)
     frob_errors = np.array(all_frob_errors)
             
-    return exposures, signatures, frob_errors, errors
+    E_final = exposures[..., -1]
+    E_whole = exposures
+    P_final = signatures[..., -1]
+    P_whole = signatures
+    kl_errors_final = errors[-1]
+    kl_errors_whole = errors
+    frob_errors_final = frob_errors[-1]
+    frob_errors_whole = frob_errors
+            
+    return E_final, E_whole, P_final, P_whole, kl_errors_final, kl_errors_whole, frob_errors_final, frob_errors_whole
 
 def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
     """
@@ -182,9 +191,13 @@ def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None,
     E_boot, _, _ = bootstrapSigExposures(m, P, R, mutation_count=mutation_count, decomposition_method=decomposition_method)
 
     all_E = []
+    all_E_whole = []
     all_P = []
-    all_frob_errors = []
-    all_errors = []
+    all_P_whole = []
+    all_kl = []
+    all_kl_whole = []
+    all_frob = []
+    all_frob_whole = []
 
     for r in range(R):
         if E_boot.ndim == 3:
@@ -192,19 +205,76 @@ def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None,
         else:
             E_r = E_boot[:, r]
 
-        exposures_r, signatures_r, frob_errors_r, errors_r = sample_sfs(
+        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = sample_sfs(
             m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps
         )
 
-        all_E.append(exposures_r)
-        all_P.append(signatures_r)
-        all_frob_errors.append(frob_errors_r)
-        all_errors.append(errors_r)
+        all_E.append(E_r_out)
+        all_E_whole.append(E_whole_r)
+        all_P.append(P_r)
+        all_P_whole.append(P_whole_r)
+        all_kl.append(kl_r)
+        all_kl_whole.append(kl_whole_r)
+        all_frob.append(frob_r)
+        all_frob_whole.append(frob_whole_r)
 
     # Concatenate the results from all replicates
-    final_exposures = np.concatenate(all_E, axis=-1)
-    final_signatures = np.concatenate(all_P, axis=-1)
-    final_frob_errors = np.concatenate(all_frob_errors, axis=-1)
-    final_errors = np.concatenate(all_errors, axis=-1)
+    final_E = np.stack(all_E, axis=-1)
+    final_E_whole = np.concatenate(all_E_whole, axis=-1)
+    final_P = np.stack(all_P, axis=-1)
+    final_P_whole = np.concatenate(all_P_whole, axis=-1)
+    final_kl = np.array(all_kl)
+    final_kl_whole = np.concatenate(all_kl_whole, axis=-1)
+    final_frob = np.array(all_frob)
+    final_frob_whole = np.concatenate(all_frob_whole, axis=-1)
 
-    return final_exposures, final_signatures, final_frob_errors, final_errors
+    return final_E, final_E_whole, final_P, final_P_whole, final_kl, final_kl_whole, final_frob, final_frob_whole
+
+def bootstrap_poisson_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
+    """
+    Combines Poisson bootstrap and SFS methods by generating Poisson bootstrap replicates of exposures
+    and running SFS on each replicate.
+    """
+    from sigconfide.estimates.bootstrap import bootstrapPoissonSigExposures
+
+    E_boot, _, _ = bootstrapPoissonSigExposures(m, P, R, mutation_count=mutation_count, decomposition_method=decomposition_method)
+
+    all_E = []
+    all_E_whole = []
+    all_P = []
+    all_P_whole = []
+    all_kl = []
+    all_kl_whole = []
+    all_frob = []
+    all_frob_whole = []
+
+    for r in range(R):
+        if E_boot.ndim == 3:
+            E_r = E_boot[:, :, r]
+        else:
+            E_r = E_boot[:, r]
+
+        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = sample_sfs(
+            m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps
+        )
+
+        all_E.append(E_r_out)
+        all_E_whole.append(E_whole_r)
+        all_P.append(P_r)
+        all_P_whole.append(P_whole_r)
+        all_kl.append(kl_r)
+        all_kl_whole.append(kl_whole_r)
+        all_frob.append(frob_r)
+        all_frob_whole.append(frob_whole_r)
+
+    # Concatenate the results from all replicates
+    final_E = np.stack(all_E, axis=-1)
+    final_E_whole = np.concatenate(all_E_whole, axis=-1)
+    final_P = np.stack(all_P, axis=-1)
+    final_P_whole = np.concatenate(all_P_whole, axis=-1)
+    final_kl = np.array(all_kl)
+    final_kl_whole = np.concatenate(all_kl_whole, axis=-1)
+    final_frob = np.array(all_frob)
+    final_frob_whole = np.concatenate(all_frob_whole, axis=-1)
+
+    return final_E, final_E_whole, final_P, final_P_whole, final_kl, final_kl_whole, final_frob, final_frob_whole

@@ -13,7 +13,29 @@ plot_types = [
     ("Error density", "error_density.png"),
     ("Spatial PCA", "spatial_pca.png")
 ]
-base_dir = "comparison_output"
+output_dir = "comparison_output"
+
+data_sources = {}
+if os.path.exists(output_dir):
+    if any(os.path.isdir(os.path.join(output_dir, pt)) for pt in patients):
+        data_sources["Legacy (Root)"] = output_dir
+    
+    for d in os.listdir(output_dir):
+        if d in patients:
+            continue
+        full_path = os.path.join(output_dir, d)
+        if os.path.isdir(full_path):
+            if any(os.path.isdir(os.path.join(full_path, pt)) for pt in patients):
+                data_sources[d] = full_path
+            elif d == "synthetic2700_all":
+                data_sources[d] = full_path
+
+if not data_sources:
+    data_sources["Legacy (Root)"] = output_dir
+
+st.sidebar.title("Data Source")
+selected_source = st.sidebar.selectbox("Choose data to view", list(data_sources.keys()))
+base_dir = data_sources[selected_source]
 
 # Define columns: 1 for the row label, and 1 for each patient
 col_ratios = [1.5, 3, 3, 3]
@@ -29,10 +51,16 @@ def next_pt(): st.session_state.pt_idx = (st.session_state.pt_idx + 1) % len(pat
 def prev_plot(): st.session_state.plot_idx = (st.session_state.plot_idx - 1) % len(plot_types)
 def next_plot(): st.session_state.plot_idx = (st.session_state.plot_idx + 1) % len(plot_types)
 
-st.sidebar.title("View Modes")
-single_plot_mode = st.sidebar.checkbox("Enable Single Plot View", value=True)
+has_patients = any(os.path.isdir(os.path.join(base_dir, pt)) for pt in patients)
 
-if single_plot_mode:
+st.sidebar.title("View Modes")
+single_plot_mode = st.sidebar.checkbox("Enable Single Plot View", value=True, disabled=not has_patients)
+
+if not has_patients:
+    st.markdown("<h2 style='text-align: center;'>Global Metrics Only (Synthetic Benchmark)</h2>", unsafe_allow_html=True)
+    st.markdown("---")
+
+elif single_plot_mode:
     st.markdown("""
         <style>
         div[data-testid="stImage"] img {
@@ -118,7 +146,7 @@ if single_plot_mode:
     
     st.markdown("---")
 
-else:
+elif has_patients:
     # Cleanup previously hidden inline styles from JS
     components.html("""
         <script>
@@ -151,3 +179,80 @@ else:
 
 st.markdown("---")
 st.markdown("*Comparison of SFS Geometry vs Bootstrap Statistics*")
+
+st.markdown("---")
+st.markdown("<h3 style='text-align: center;'>Signature Modifications Timeline</h3>", unsafe_allow_html=True)
+if has_patients:
+    for pt in patients:
+        img_path1 = os.path.join(base_dir, pt, "P_cosine_similarity.png")
+        img_path2 = os.path.join(base_dir, pt, "P_cosine_similarity_per_sig.png")
+        img_path3 = os.path.join(base_dir, pt, "P_cosine_similarity_dist.png")
+        if os.path.exists(img_path1) and os.path.exists(img_path2):
+            cols = st.columns(2)
+            cols[0].image(img_path1, use_container_width=True)
+            cols[1].image(img_path2, use_container_width=True)
+            if os.path.exists(img_path3):
+                cols_dist = st.columns([1, 2, 1])
+                cols_dist[1].image(img_path3, use_container_width=True)
+            break
+        elif os.path.exists(img_path1):
+            cols = st.columns([1, 2, 1])
+            cols[1].image(img_path1, use_container_width=True)
+            if os.path.exists(img_path3):
+                cols_dist = st.columns([1, 2, 1])
+                cols_dist[1].image(img_path3, use_container_width=True)
+            break
+else:
+    img_path1 = os.path.join(base_dir, "P_cosine_similarity.png")
+    img_path2 = os.path.join(base_dir, "P_cosine_similarity_per_sig.png")
+    img_path3 = os.path.join(base_dir, "P_cosine_similarity_dist.png")
+    if os.path.exists(img_path1) and os.path.exists(img_path2):
+        cols = st.columns(2)
+        cols[0].image(img_path1, use_container_width=True)
+        cols[1].image(img_path2, use_container_width=True)
+        if os.path.exists(img_path3):
+            cols_dist = st.columns([1, 2, 1])
+            cols_dist[1].image(img_path3, use_container_width=True)
+    elif os.path.exists(img_path1):
+        cols = st.columns([1, 2, 1])
+        cols[1].image(img_path1, use_container_width=True)
+        if os.path.exists(img_path3):
+            cols_dist = st.columns([1, 2, 1])
+            cols_dist[1].image(img_path3, use_container_width=True)
+
+st.markdown("---")
+st.markdown("<h3 style='text-align: center;'>Exposure Differences (E_other - E_opt)</h3>", unsafe_allow_html=True)
+img_path_global_box = os.path.join(base_dir, "global_exposure_diff_box.png")
+if os.path.exists(img_path_global_box):
+    cols = st.columns([1, 4, 1])
+    cols[1].image(img_path_global_box, use_container_width=True)
+
+st.markdown("---")
+st.markdown("<h3 style='text-align: center;'>Difference in Pairwise Cosine Similarity</h3>", unsafe_allow_html=True)
+if has_patients:
+    for pt in patients:
+        img_path_heatmap = os.path.join(base_dir, pt, "pairwise_cosine_similarity.png")
+        if os.path.exists(img_path_heatmap):
+            cols = st.columns([1, 3, 1])
+            cols[1].image(img_path_heatmap, use_container_width=True)
+            break
+else:
+    img_path_heatmap = os.path.join(base_dir, "pairwise_cosine_similarity.png")
+    if os.path.exists(img_path_heatmap):
+        cols = st.columns([1, 3, 1])
+        cols[1].image(img_path_heatmap, use_container_width=True)
+
+st.markdown("---")
+st.markdown("<h3 style='text-align: center;'>Global Reconstruction Errors Density</h3>", unsafe_allow_html=True)
+img_path_iter1 = os.path.join(base_dir, "global_recon_err_density_iter1.png")
+img_path_iter1000 = os.path.join(base_dir, "global_recon_err_density_iter1000.png")
+img_path_qp = os.path.join(base_dir, "global_recon_err_density_qp.png")
+
+if os.path.exists(img_path_iter1) and os.path.exists(img_path_iter1000):
+    cols = st.columns(2)
+    cols[0].image(img_path_iter1, width="stretch", caption="After 1 Iteration")
+    cols[1].image(img_path_iter1000, width="stretch", caption="After 1000 Iterations")
+
+if os.path.exists(img_path_qp):
+    cols_qp = st.columns([1, 2, 1])
+    cols_qp[1].image(img_path_qp, width="stretch", caption="Original QP")

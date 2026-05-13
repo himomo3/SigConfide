@@ -62,3 +62,6 @@ html/
 latex/
 doxygen_sqlite3.db
 
+*.npz
+comparison_output/
+Lib
