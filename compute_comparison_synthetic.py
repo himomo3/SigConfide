@@ -10,6 +10,7 @@ from sigconfide.estimates.bootstrap import bootstrapSigExposures, bootstrapPoiss
 from sigconfide.estimates.sfs import sample_sfs, bootstrap_sfs, bootstrap_poisson_sfs
 from sigconfide.estimates.standard import findSigExposures
 from sigconfide.decompose.qp import decomposeQP
+from SigProfilerAssignment import Analyzer as Analyze
 
 def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="comparison_output"):
     out_path = os.path.join(output_dir, "synthetic2700_all")
@@ -19,7 +20,7 @@ def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="
     
     samples, patient_names = load_samples_file(sample_file)
     signatures, sig_names = load_signatures_file(sig_file)
-    if sig_names[0] == 'Samples' or sig_names[0] == 'Type':
+    if sig_names[0] == 'Samples' or sig_names[0] == 'Type' or sig_names[0] == 'Sampl' or sig_names[0].startswith('Samp'):
         sig_names = sig_names[1:]
 
     # Load ground truth exposures
@@ -108,6 +109,132 @@ def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="
     t1_sfs = time.time()
     print(f"  [SFS completed in {t1_sfs - t0_sfs:.2f} seconds]", flush=True)
     
+    print("  Running SigProfilerAssignment...", flush=True)
+    spa_output_dir = os.path.join(out_path, "spa_output")
+    try:
+        Analyze.cosmic_fit(
+            samples=sample_file,
+            output=spa_output_dir,
+            input_type="matrix",
+            signature_database=sig_file,
+            genome_build="GRCh37",
+            make_plots=False,
+            verbose=False
+        )
+        
+        spa_activities_path = os.path.join(spa_output_dir, "Assignment_Solution", "Activities", "Assignment_Solution_Activities.txt")
+        spa_df = pd.read_csv(spa_activities_path, sep="\t", index_col=0)
+        
+        E_spa_whole_all = np.zeros((len(target_indices), len(patient_names)))
+        for i, sig in enumerate(sig_names_filtered):
+            if sig in spa_df.columns:
+                for j, pat in enumerate(patient_names):
+                    if pat in spa_df.index:
+                        E_spa_whole_all[i, j] = spa_df.loc[pat, sig]
+        
+        # Normalize SPA exposures to 0-1 proportions
+        spa_sums = E_spa_whole_all.sum(axis=0)
+        E_spa_whole_all = np.divide(E_spa_whole_all, spa_sums, out=np.zeros_like(E_spa_whole_all), where=spa_sums!=0)
+    except Exception as e:
+        print(f"  [SPA failed: {e}]", flush=True)
+        E_spa_whole_all = np.zeros((len(target_indices), len(patient_names)))
+    
+    # ---- METRICS CALCULATION ----
+    print("  Computing evaluation metrics...", flush=True)
+    
+    # Normalize truth to fractional exposures to match predictions
+    truth_sums = np.sum(E_truth_whole_all, axis=0)
+    truth_sums[truth_sums == 0] = 1.0 # avoid div zero
+    E_truth_frac = E_truth_whole_all / truth_sums
+
+    def compute_f1(truth, pred, thresh=1e-5):
+        t_bool = truth > thresh
+        p_bool = pred > thresh
+        tp = np.sum(t_bool & p_bool)
+        fp = np.sum(~t_bool & p_bool)
+        fn = np.sum(t_bool & ~p_bool)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        return 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    def compute_l1(truth, pred):
+        return np.mean(np.abs(truth - pred))
+
+    def compute_cosine(truth, pred):
+        num_samples = truth.shape[1]
+        cos_sims = []
+        for i in range(num_samples):
+            t = truth[:, i]
+            p = pred[:, i]
+            norm_t = np.linalg.norm(t)
+            norm_p = np.linalg.norm(p)
+            if norm_t > 0 and norm_p > 0:
+                cos_sims.append(np.dot(t, p) / (norm_t * norm_p))
+            elif norm_t == 0 and norm_p == 0:
+                cos_sims.append(1.0)
+            else:
+                cos_sims.append(0.0)
+        return np.mean(cos_sims)
+
+    def compute_coverage(truth, lower, upper):
+        eps = 1e-7
+        covered = (truth >= lower - eps) & (truth <= upper + eps)
+        return np.mean(covered) * 100.0
+
+    def compute_interval_width(lower, upper):
+        return np.mean(upper - lower)
+
+    E_sfs_mean = np.mean(E_reg_whole_all, axis=2)
+    E_boot_mean = np.mean(E_boot_pois_whole, axis=2)
+
+    E_sfs_lower = np.min(E_reg_whole_all, axis=2)
+    E_sfs_upper = np.max(E_reg_whole_all, axis=2)
+    
+    E_boot_lower = np.percentile(E_boot_pois_whole, 2.5, axis=2)
+    E_boot_upper = np.percentile(E_boot_pois_whole, 97.5, axis=2)
+
+    num_samples = E_truth_frac.shape[1]
+
+    metrics = {
+        "Method": ["QP", "SFS", "Bootstrap", "SigProfilerAssignment"],
+        "Sample Size": [num_samples, num_samples, num_samples, num_samples],
+        "F1-Score": [
+            compute_f1(E_truth_frac, E_opt_whole_all),
+            compute_f1(E_truth_frac, E_sfs_mean),
+            compute_f1(E_truth_frac, E_boot_mean),
+            compute_f1(E_truth_frac, E_spa_whole_all)
+        ],
+        "L1 Error": [
+            compute_l1(E_truth_frac, E_opt_whole_all),
+            compute_l1(E_truth_frac, E_sfs_mean),
+            compute_l1(E_truth_frac, E_boot_mean),
+            compute_l1(E_truth_frac, E_spa_whole_all)
+        ],
+        "Cosine Similarity": [
+            compute_cosine(E_truth_frac, E_opt_whole_all),
+            compute_cosine(E_truth_frac, E_sfs_mean),
+            compute_cosine(E_truth_frac, E_boot_mean),
+            compute_cosine(E_truth_frac, E_spa_whole_all)
+        ],
+        "Coverage (%)": [
+            None,
+            compute_coverage(E_truth_frac, E_sfs_lower, E_sfs_upper),
+            compute_coverage(E_truth_frac, E_boot_lower, E_boot_upper),
+            None
+        ],
+        "Interval Width": [
+            None,
+            compute_interval_width(E_sfs_lower, E_sfs_upper),
+            compute_interval_width(E_boot_lower, E_boot_upper),
+            None
+        ]
+    }
+    
+    metrics_df = pd.DataFrame(metrics)
+    metrics_csv_path = os.path.join(out_path, "metrics_summary.csv")
+    metrics_df.to_csv(metrics_csv_path, index=False)
+    print(f"  Saved metrics to {metrics_csv_path}", flush=True)
+
     # Save global matrices
     global_data_path = os.path.join(out_path, "global_computed_data.npz")
     np.savez(global_data_path,
@@ -116,12 +243,14 @@ def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="
              E_reg_whole_all=E_reg_whole_all,
              E_bs_whole_all=E_bs_whole_all,
              E_boot_pois_whole=E_boot_pois_whole,
+             E_spa_whole_all=E_spa_whole_all,
              P_original=P,
              P_sfs_whole_all=P_sfs_whole_all,
              M_norm=M_norm,
              kl_errors_sfs_whole_all=kl_errors_sfs_whole_all,
              n_reg_sfs_whole=n_reg_sfs_whole_all,
-             sig_names_filtered=sig_names_filtered)
+             sig_names_filtered=sig_names_filtered,
+             patient_names=patient_names)
     print(f"  Saved global data to {global_data_path}", flush=True)
 
     end_time = time.time()

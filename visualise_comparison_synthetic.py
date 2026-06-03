@@ -21,6 +21,12 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
     E_reg_whole_all = data['E_reg_whole_all']
     E_bs_whole_all = data['E_bs_whole_all']
     E_boot_pois_whole = data['E_boot_pois_whole']
+    
+    try:
+        E_spa_whole_all = data['E_spa_whole_all']
+        has_spa = True
+    except KeyError:
+        has_spa = False
     P_original = data['P_original']
     P_sfs_whole_all = data['P_sfs_whole_all']
     M_norm = data['M_norm']
@@ -47,7 +53,11 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
     diff_opt = E_opt_whole_all - E_truth_whole_all
     mean_diff_opt = np.mean(diff_opt, axis=1)
 
-    flier_style = {'marker': '.', 'markersize': 1, 'alpha': 0.1, 'markeredgecolor': 'none', 'markerfacecolor': 'black'}
+    if has_spa:
+        diff_spa = E_spa_whole_all - E_truth_whole_all
+        mean_diff_spa = np.mean(diff_spa, axis=1)
+
+    flier_style = {'marker': ',', 'markersize': 0.5, 'alpha': 0.02, 'markeredgecolor': 'none', 'markerfacecolor': 'black'}
     bp_diff_boot_pois = ax_diff_box.boxplot(diff_boot_pois_data, positions=x_bounds - width, widths=width,
                                      patch_artist=True, showmeans=True, showfliers=True,
                                      meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5},
@@ -72,7 +82,10 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
         patch.set_facecolor('lightblue')
         patch.set_alpha(0.7)
         
-    ax_diff_box.plot(x_bounds, mean_diff_opt, '^', color='black', markersize=8, zorder=5)
+    ax_diff_box.plot(x_bounds - width/2, mean_diff_opt, '^', color='black', markersize=8, zorder=5)
+    
+    if has_spa:
+        ax_diff_box.plot(x_bounds + width/2, mean_diff_spa, 's', color='green', markersize=8, zorder=5)
         
     ax_diff_box.axhline(0, color='black', linestyle='--', linewidth=1)
     ax_diff_box.set_xticks(x_bounds)
@@ -88,6 +101,8 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
         mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'),
         mlines.Line2D([0], [0], marker='^', color='w', markerfacecolor='black', markersize=8, label='Optimal (QP Mean)')
     ]
+    if has_spa:
+        legend_elements_global.append(mlines.Line2D([0], [0], marker='s', color='w', markerfacecolor='green', markersize=10, label='SigProfilerAssignment'))
     
     ax_diff_box.legend(handles=legend_elements_global, loc='upper right', bbox_to_anchor=(1.15, 1.05))
     plt.tight_layout()
@@ -234,9 +249,7 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
     plt.savefig(os.path.join(out_path, "P_cosine_similarity_dist.png"), dpi=200)
     plt.close()
     
-    # 6. Pairwise Cosine Similarity Difference Heatmap
-    fig_heatmap, ax = plt.subplots(figsize=(10, 8))
-
+    # 6. Pairwise Cosine Similarity Heatmaps
     norm_orig = np.linalg.norm(P_original, axis=0)
     norm_orig_safe = np.where(norm_orig == 0, 1.0, norm_orig)
     P_orig_norm = P_original / norm_orig_safe
@@ -248,6 +261,31 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
     P_final_norm = P_final / norm_final_safe
     sim_final = P_final_norm.T @ P_final_norm
 
+    # --- Plot Original & Final side-by-side ---
+    fig_heatmap_orig_final, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
+
+    im1 = ax1.imshow(sim_orig, cmap='viridis', vmin=0, vmax=1)
+    ax1.set_title("Original Signatures Pairwise Cosine Similarity")
+    ax1.set_xticks(np.arange(len(sig_names_filtered)))
+    ax1.set_yticks(np.arange(len(sig_names_filtered)))
+    ax1.set_xticklabels(sig_names_filtered, rotation=90)
+    ax1.set_yticklabels(sig_names_filtered)
+    fig_heatmap_orig_final.colorbar(im1, ax=ax1)
+
+    im2 = ax2.imshow(sim_final, cmap='viridis', vmin=0, vmax=1)
+    ax2.set_title("Final SFS Signatures Pairwise Cosine Similarity")
+    ax2.set_xticks(np.arange(len(sig_names_filtered)))
+    ax2.set_yticks(np.arange(len(sig_names_filtered)))
+    ax2.set_xticklabels(sig_names_filtered, rotation=90)
+    ax2.set_yticklabels(sig_names_filtered)
+    fig_heatmap_orig_final.colorbar(im2, ax=ax2)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_path, "pairwise_cosine_similarity_original_final.png"), dpi=200)
+    plt.close()
+
+    # --- Plot Difference ---
+    fig_heatmap_diff, ax = plt.subplots(figsize=(10, 8))
     sim_diff = sim_final - sim_orig
 
     max_abs_diff = max(np.abs(np.min(sim_diff)), np.abs(np.max(sim_diff)))
@@ -260,10 +298,10 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
     ax.set_yticks(np.arange(len(sig_names_filtered)))
     ax.set_xticklabels(sig_names_filtered, rotation=90)
     ax.set_yticklabels(sig_names_filtered)
-    fig_heatmap.colorbar(im, ax=ax)
+    fig_heatmap_diff.colorbar(im, ax=ax)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_path, "pairwise_cosine_similarity.png"), dpi=200)
+    plt.savefig(os.path.join(out_path, "pairwise_cosine_similarity_diff.png"), dpi=200)
     plt.close()
     
     print("Finished visualising synthetic data.")

@@ -51,7 +51,7 @@ class TestBootstrapSigExposures(unittest.TestCase):
 
         np.random.seed(42)
 
-        exposures, errors = bootstrapSigExposures(m, mutation_count=100, R=3, P=P)
+        exposures, errors, kl_errors = bootstrapSigExposures(m, mutation_count=100, R=3, P=P)
 
         np.testing.assert_array_almost_equal(exposures, expected_exposures, decimal=7)
 

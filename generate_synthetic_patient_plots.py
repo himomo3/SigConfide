@@ -24,6 +24,12 @@ def generate_patient_plots(out_path, sample_file=None):
     E_truth_sums = E_truth_whole_all.sum(axis=0)
     E_truth_whole_all = np.divide(E_truth_whole_all, E_truth_sums, out=np.zeros_like(E_truth_whole_all), where=E_truth_sums!=0)
     
+    try:
+        E_spa_whole_all = data['E_spa_whole_all']
+        has_spa = True
+    except KeyError:
+        has_spa = False
+    
     # Calculate L1 exposure error for each sample to pick big, moderate, and small error cases
     l1_errors = np.sum(np.abs(E_truth_whole_all - E_opt_whole_all), axis=0)
     sorted_indices = np.argsort(l1_errors)
@@ -44,7 +50,9 @@ def generate_patient_plots(out_path, sample_file=None):
         selected_indices = sorted_indices.tolist()
         
     # Get sample names
-    if sample_file and os.path.exists(sample_file):
+    if 'patient_names' in data:
+        sample_names = data['patient_names'].tolist()
+    elif sample_file and os.path.exists(sample_file):
         import pandas as pd
         df = pd.read_csv(sample_file, sep='\t', index_col=0, nrows=0)
         sample_names = df.columns.tolist()
@@ -116,7 +124,7 @@ def generate_patient_plots(out_path, sample_file=None):
             patch.set_facecolor('lightblue')
             patch.set_alpha(0.7)
             
-        ax_bounds.plot(x_bounds, E_opt, '*', color='black', markersize=8, zorder=6)
+        ax_bounds.plot(x_bounds - width, E_opt, '*', color='black', markersize=8, zorder=6)
         ax_bounds.plot(x_bounds, E_truth, 'D', color='gold', markersize=8, markeredgecolor='black', zorder=5)
         
         legend_elements = [
@@ -129,6 +137,23 @@ def generate_patient_plots(out_path, sample_file=None):
             mlines.Line2D([0], [0], marker='*', color='w', label='Original QP (E_opt)', markerfacecolor='black', markersize=12),
             mlines.Line2D([0], [0], marker='D', color='w', label='Ground Truth (E_truth)', markerfacecolor='gold', markeredgecolor='black', markersize=10)
         ]
+        
+        if has_spa:
+            E_spa = E_spa_whole_all[:, pt_idx]
+            if E_spa.ndim == 1 or E_spa.shape[1] == 1:
+                # Plot as singular green squares
+                ax_bounds.plot(x_bounds + width, E_spa.flatten(), 's', color='green', markersize=8, zorder=7)
+                legend_elements.append(mlines.Line2D([0], [0], marker='s', color='w', label='SigProfilerAssignment', markerfacecolor='green', markersize=10))
+            else:
+                # Plot as green box plots
+                spa_data = [E_spa[i, :] for i in range(num_sigs)]
+                bp_spa = ax_bounds.boxplot(spa_data, positions=x_bounds + width, widths=width,
+                                           patch_artist=True, showmeans=True, showfliers=False,
+                                           meanprops={'marker':'s', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
+                for patch in bp_spa['boxes']:
+                    patch.set_facecolor('lightgreen')
+                    patch.set_alpha(0.7)
+                legend_elements.append(mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='SigProfilerAssignment'))
         
         ax_bounds.set_xticks(x_bounds)
         ax_bounds.set_xticklabels(sig_names_filtered, rotation=45, ha='right')

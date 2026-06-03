@@ -286,9 +286,7 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             plt.savefig(os.path.join(pt_dir, "P_cosine_similarity_dist.png"), dpi=200)
             plt.close()
             
-            # 6. Pairwise Cosine Similarity Difference Heatmap
-            fig_heatmap, ax = plt.subplots(figsize=(10, 8))
-
+            # 6. Pairwise Cosine Similarity Heatmaps
             # Original P
             norm_orig = np.linalg.norm(P_original, axis=0)
             norm_orig_safe = np.where(norm_orig == 0, 1.0, norm_orig)
@@ -301,8 +299,32 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             norm_final_safe = np.where(norm_final == 0, 1.0, norm_final)
             P_final_norm = P_final / norm_final_safe
             sim_final = P_final_norm.T @ P_final_norm
+            
+            # --- Plot Original & Final side-by-side ---
+            fig_heatmap_orig_final, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
 
-            # Difference
+            im1 = ax1.imshow(sim_orig, cmap='viridis', vmin=0, vmax=1)
+            ax1.set_title("Original Signatures Pairwise Cosine Similarity")
+            ax1.set_xticks(np.arange(len(sig_names_filtered)))
+            ax1.set_yticks(np.arange(len(sig_names_filtered)))
+            ax1.set_xticklabels(sig_names_filtered, rotation=90)
+            ax1.set_yticklabels(sig_names_filtered)
+            fig_heatmap_orig_final.colorbar(im1, ax=ax1)
+
+            im2 = ax2.imshow(sim_final, cmap='viridis', vmin=0, vmax=1)
+            ax2.set_title("Final SFS Signatures Pairwise Cosine Similarity")
+            ax2.set_xticks(np.arange(len(sig_names_filtered)))
+            ax2.set_yticks(np.arange(len(sig_names_filtered)))
+            ax2.set_xticklabels(sig_names_filtered, rotation=90)
+            ax2.set_yticklabels(sig_names_filtered)
+            fig_heatmap_orig_final.colorbar(im2, ax=ax2)
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(pt_dir, "pairwise_cosine_similarity_original_final.png"), dpi=200)
+            plt.close()
+
+            # --- Plot Difference ---
+            fig_heatmap_diff, ax = plt.subplots(figsize=(10, 8))
             sim_diff = sim_final - sim_orig
 
             max_abs_diff = max(np.abs(np.min(sim_diff)), np.abs(np.max(sim_diff)))
@@ -315,10 +337,10 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             ax.set_yticks(np.arange(len(sig_names_filtered)))
             ax.set_xticklabels(sig_names_filtered, rotation=90)
             ax.set_yticklabels(sig_names_filtered)
-            fig_heatmap.colorbar(im, ax=ax)
+            fig_heatmap_diff.colorbar(im, ax=ax)
 
             plt.tight_layout()
-            plt.savefig(os.path.join(pt_dir, "pairwise_cosine_similarity.png"), dpi=200)
+            plt.savefig(os.path.join(pt_dir, "pairwise_cosine_similarity_diff.png"), dpi=200)
             plt.close()
             
         else:

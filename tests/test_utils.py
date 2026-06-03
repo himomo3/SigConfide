@@ -91,4 +91,27 @@ class TestLoadSamplesFile(unittest.TestCase):
         expected_result = np.array([[2, 3], [5, 6]])
         np.testing.assert_array_equal(samples, expected_result)
 
+    def test_load_breast_signatures_reordered(self):
+        # Breast_Signatures.csv is loaded via load_signatures_file.
+        # It has 96 SBS rows but sorted differently.
+        # Check that it gets reordered to standard SBS order.
+        signatures, names = load_signatures_file(os.path.join(current_dir, 'data', 'Breast_Signatures.csv'))
+        self.assertEqual(signatures.shape, (96, 28))
+        # Raw file has row index 4 (5th data row, line 7 of the file) as "C[C>A]A".
+        # In standard SBS order, this is at index 24.
+        # Let's verify that the values for row index 4 from the raw file are indeed at index 24 of the loaded signatures.
+        # Raw row values: 0.000893614751327785, 0.0076476519510486, ...
+        np.testing.assert_almost_equal(signatures[24, 0], 0.000893614751327785)
+        np.testing.assert_almost_equal(signatures[24, 1], 0.0076476519510486)
+
+    def test_load_format_2_reordered(self):
+        # format_2.dat has Trinucleotide and Mutation type columns and is SBS.
+        # Check that it is correctly standardized and reordered.
+        samples, names = load_samples_file(os.path.join(current_dir, 'data', 'format_2.dat'))
+        self.assertEqual(samples.shape, (96, 100))
+        # Raw row index 4 in format_2.dat (5th data row, line 6 of file) is C>A, CCA -> C[C>A]A.
+        # Values: 66, 92, 72, 81...
+        # In standard SBS, C[C>A]A is at index 24.
+        np.testing.assert_array_equal(samples[24, :4], [66, 92, 72, 81])
+
 

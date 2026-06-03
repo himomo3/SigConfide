@@ -41,6 +41,11 @@ def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=Non
         bootstrapSigExposures(tumorBRCA[:, 1], signaturesCOSMIC[:, sigsBRCA], 10, 1000, decomposeQP)
     """
 
+    if decomposition_method is None:
+        if decomposeQP is None:
+             raise ImportError("The default decomposition method 'decomposeQP' requires 'quadprog' which is not installed. Please install 'quadprog' or provide a custom 'decomposition_method'.")
+        decomposition_method = decomposeQP
+
     is_2d = m.ndim == 2 and m.shape[1] > 1
     if m.shape[0] != P.shape[0]:
         raise ValueError("Rows of matrix 'm' and rows of matrix 'P' must be the same.")
@@ -148,6 +153,11 @@ def bootstrapPoissonSigExposures(m, P, R, mutation_count=None, decomposition_met
             - errors (numpy.ndarray): Estimation error for each bootstrap replicate (Frobenius norm).
             - kl_errors (numpy.ndarray): Estimation error for each bootstrap replicate (KL divergence).
     """
+
+    if decomposition_method is None:
+        if decomposeQP is None:
+             raise ImportError("The default decomposition method 'decomposeQP' requires 'quadprog' which is not installed. Please install 'quadprog' or provide a custom 'decomposition_method'.")
+        decomposition_method = decomposeQP
 
     is_2d = m.ndim == 2 and m.shape[1] > 1
     if m.shape[0] != P.shape[0]:
