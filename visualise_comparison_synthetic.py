@@ -3,8 +3,8 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-def visualise_comparison_synthetic(output_dir="comparison_output"):
-    out_path = os.path.join(output_dir, "synthetic2700_all")
+def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
+    out_path = os.path.join("comparison_output", output_dir)
     global_data_path = os.path.join(out_path, "global_computed_data.npz")
     
     if not os.path.exists(global_data_path):
@@ -308,7 +308,7 @@ def visualise_comparison_synthetic(output_dir="comparison_output"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualise computed synthetic benchmark results.")
-    parser.add_argument("--output_dir", default="comparison_output", help="Output directory containing the computed results")
+    parser.add_argument("--output_dir", default="synthetic2700_all", help="Output directory containing the computed results")
     args = parser.parse_args()
     
     visualise_comparison_synthetic(args.output_dir)

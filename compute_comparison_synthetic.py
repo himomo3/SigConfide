@@ -12,8 +12,8 @@ from sigconfide.estimates.standard import findSigExposures
 from sigconfide.decompose.qp import decomposeQP
 from SigProfilerAssignment import Analyzer as Analyze
 
-def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="comparison_output"):
-    out_path = os.path.join(output_dir, "synthetic2700_all")
+def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="synthetic2700_all"):
+    out_path = os.path.join("comparison_output", output_dir)
     os.makedirs(out_path, exist_ok=True)
     
     start_time = time.time()    
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/Samples.txt", help="Path to sample file")
     parser.add_argument("--sig_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/COSMIC_v3.3_SBS_GRCh37.txt", help="Path to signatures file")
     parser.add_argument("--truth_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/ground.truth.syn.exposures.csv", help="Path to ground truth exposures")
-    parser.add_argument("--output_dir", default="comparison_output", help="Output directory")
+    parser.add_argument("--output_dir", default="synthetic2700_all", help="Output directory")
     
     args = parser.parse_args()
     compute_comparison_synthetic(args.sample_file, args.sig_file, args.truth_file, args.output_dir)

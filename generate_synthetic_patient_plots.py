@@ -7,7 +7,8 @@ import matplotlib.lines as mlines
 
 import argparse
 
-def generate_patient_plots(out_path, sample_file=None):
+def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, patient_list=None):
+    out_path = os.path.join("comparison_output", output_dir)
     global_data_path = os.path.join(out_path, 'global_computed_data.npz')
     if not os.path.exists(global_data_path):
         print(f"Error: {global_data_path} not found.")
@@ -30,26 +31,8 @@ def generate_patient_plots(out_path, sample_file=None):
     except KeyError:
         has_spa = False
     
-    # Calculate L1 exposure error for each sample to pick big, moderate, and small error cases
-    l1_errors = np.sum(np.abs(E_truth_whole_all - E_opt_whole_all), axis=0)
-    sorted_indices = np.argsort(l1_errors)
-    num_samples = len(sorted_indices)
-    
-    if num_samples >= 9:
-        small_indices = sorted_indices[:3].tolist()
-        median_idx = num_samples // 2
-        moderate_indices = sorted_indices[median_idx-1:median_idx+2].tolist()
-        big_indices = sorted_indices[-3:].tolist()
-        
-        # Combine in order: small, moderate, big, preserving uniqueness
-        selected_indices = []
-        for idx in small_indices + moderate_indices + big_indices:
-            if idx not in selected_indices:
-                selected_indices.append(idx)
-    else:
-        selected_indices = sorted_indices.tolist()
-        
     # Get sample names
+    num_samples_data = E_truth_whole_all.shape[1]
     if 'patient_names' in data:
         sample_names = data['patient_names'].tolist()
     elif sample_file and os.path.exists(sample_file):
@@ -58,7 +41,53 @@ def generate_patient_plots(out_path, sample_file=None):
         sample_names = df.columns.tolist()
     else:
         # If no sample file, just use generic names
-        sample_names = [f"Patient_{i}" for i in range(num_samples)]
+        sample_names = [f"Patient_{i}" for i in range(num_samples_data)]
+        
+    if patient_list is not None and patient_list.lower() != 'none':
+        patient_list_path = os.path.join("comparison_output", patient_list)
+        
+        if not os.path.exists(patient_list_path):
+            print(f"Error: patient list file {patient_list_path} not found.")
+            return
+            
+        with open(patient_list_path, "r") as f:
+            list_patients = [line.strip() for line in f if line.strip()]
+            
+        selected_indices = []
+        missing_patients = []
+        for p in list_patients:
+            if p in sample_names:
+                selected_indices.append(sample_names.index(p))
+            else:
+                missing_patients.append(p)
+                
+        if missing_patients:
+            print(f"Error: The following patients from the list are not present in the data:\n" + "\n".join(missing_patients))
+            return
+    else:
+        # Calculate L1 exposure error for each sample to pick big, moderate, and small error cases
+        l1_errors = np.sum(np.abs(E_truth_whole_all - E_opt_whole_all), axis=0)
+        sorted_indices = np.argsort(l1_errors)
+        num_samples = len(sorted_indices)
+        
+        if num_samples >= 9:
+            small_indices = sorted_indices[:3].tolist()
+            median_idx = num_samples // 2
+            moderate_indices = sorted_indices[median_idx-1:median_idx+2].tolist()
+            big_indices = sorted_indices[-3:].tolist()
+            
+            # Combine in order: small, moderate, big, preserving uniqueness
+            selected_indices = []
+            for idx in small_indices + moderate_indices + big_indices:
+                if idx not in selected_indices:
+                    selected_indices.append(idx)
+        else:
+            selected_indices = sorted_indices.tolist()
+
+        # Save patient list to file in output_dir
+        with open(os.path.join(out_path, "selected_patients.txt"), "w") as f:
+            for idx in selected_indices:
+                f.write(f"{sample_names[idx]}\n")
         
     # Replace '::' with '..' in sample names because '::' is invalid for Windows paths
     patients = [(i, sample_names[i].replace('::', '..')) for i in selected_indices]
@@ -257,6 +286,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic patient plots")
     parser.add_argument("--output_dir", default="comparison_output/synthetic2700_all", help="Output directory")
     parser.add_argument("--sample_file", default=None, help="Path to sample file to get names")
+    parser.add_argument("--patient_list", default=None, help="Path to a text file containing a list of patients to plot")
     args = parser.parse_args()
     
-    generate_patient_plots(args.output_dir, args.sample_file)
+    generate_patient_plots(args.output_dir, args.sample_file, args.patient_list)
