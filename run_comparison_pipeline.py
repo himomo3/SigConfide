@@ -8,8 +8,10 @@ def main():
     parser.add_argument("--sample_file", default="tests/data/counts_tumorBRCA.txt", help="Path to sample file")
     parser.add_argument("--sig_file", default="sigconfide/utils/data/COSMIC_v2_SBS_GRCh37.txt", help="Path to signatures file")
     parser.add_argument("--patients", nargs="+", default=["PD24196", "PD8609", "PD13608"], help="List of patients")
-    parser.add_argument("--output_dir", default="comparison_output", help="Output directory")
-    parser.add_argument("--bootstrap_type", choices=["regular", "poisson"], default="poisson", help="Bootstrap type (regular or poisson)")
+    parser.add_argument("--output_dir", default="brca560", help="Output directory inside comparison_output")
+    parser.add_argument("--bootstrap_type", choices=["regular", "poisson", "all", "none"], default="poisson", help="Bootstrap type")
+    parser.add_argument("--hybrid", action="store_true", help="Run hybrid bootstrap SFS")
+    parser.add_argument("--no-spa", dest="run_spa", action="store_false", help="Disable SigProfilerAssignment")
     parser.add_argument("--whole", action="store_true", default=True, help="Compute on whole matrix (default: True)")
     parser.add_argument("--no-whole", dest="whole", action="store_false", help="Compute per patient")
     parser.add_argument("--run_all", action="store_true", help="Run all combinations of hard-coded samples and bootstrap types")
@@ -39,6 +41,10 @@ def main():
                 "--output_dir", args.output_dir,
                 "--bootstrap_type", current_bootstrap,
             ]
+            if args.hybrid:
+                compute_cmd.append("--hybrid")
+            if not args.run_spa:
+                compute_cmd.append("--no-spa")
             if not args.whole:
                 compute_cmd.append("--no-whole")
                 
@@ -56,6 +62,7 @@ def main():
             vis_cmd = [
                 sys.executable, visualise_script,
                 "--sample_file", current_sample,
+                "--sig_file", args.sig_file,
                 "--output_dir", args.output_dir,
                 "--bootstrap_type", current_bootstrap,
             ]

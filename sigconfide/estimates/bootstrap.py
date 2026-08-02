@@ -1,4 +1,5 @@
 import numpy as np
+import multiprocessing as mp
 from sigconfide.utils.utils import is_wholenumber, FrobeniusNorm, kl_divergence
 
 # Try to import decomposeQP, but don't fail if it's missing (allows testing without quadprog)
@@ -7,7 +8,11 @@ try:
 except ImportError:
     decomposeQP = None
 
-def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=None):
+def _run_bootstrap_replicate(args):
+    m_sample, P, decomposition_method = args
+    return decomposition_method(m_sample, P)
+
+def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=None, n_jobs=-2):
     """
     Obtain the bootstrap distribution of signature exposures for a tumor sample.
 
@@ -52,84 +57,94 @@ def bootstrapSigExposures(m, P, R, mutation_count=None, decomposition_method=Non
 
     K = m.shape[0]  # number of mutation types
     
-    if is_2d:
-        G = m.shape[1]
-        if mutation_count is None:
-            mutation_count = []
+    if n_jobs == -1:
+        processes = min(R, mp.cpu_count())
+    elif n_jobs == -2:
+        processes = min(R, max(1, mp.cpu_count() // 2))
+    else:
+        processes = min(R, max(1, n_jobs))
+
+    with mp.Pool(processes=processes) as pool:
+        if is_2d:
+            G = m.shape[1]
+            if mutation_count is None:
+                mutation_count = []
+                for g in range(G):
+                    if all(is_wholenumber(val) for val in m[:, g]):
+                        mutation_count.append(int(m[:, g].sum()))
+                    else:
+                        raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
+            else:
+                if isinstance(mutation_count, (int, float, np.integer)):
+                    mutation_count = [int(mutation_count)] * G
+    
+            m = m / m.sum(axis=0)
+            
+            def bootstrap_sample_col(m_col, mc, K):
+                mutations_sampled = np.random.choice(K, size=mc, p=m_col)
+                return np.bincount(mutations_sampled, minlength=K) / mc
+                
+            exposures_all = []
+            errors_all = []
+            kl_errors_all = []
+            
             for g in range(G):
-                if all(is_wholenumber(val) for val in m[:, g]):
-                    mutation_count.append(int(m[:, g].sum()))
+                m_samples = [bootstrap_sample_col(m[:, g], mutation_count[g], K) for _ in range(R)]
+                tasks = [(samp, P, decomposition_method) for samp in m_samples]
+                exposures_g = np.column_stack(pool.map(_run_bootstrap_replicate, tasks))
+                
+                # normalize sum
+                expos_sum = np.sum(exposures_g, axis=0)
+                expos_sum[expos_sum == 0] = 1.0 # prevent division by zero
+                exposures_g = exposures_g / expos_sum
+                
+                errors_g = np.vectorize(lambda i: FrobeniusNorm(m[:, g], P, exposures_g[:, i]))(range(exposures_g.shape[1]))
+                
+                m_approx = P @ exposures_g
+                eps = 1e-10
+                m_expanded = m[:, g][:, np.newaxis]
+                kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
+                kl_errors_g = np.sum(kl_matrix, axis=0)
+                
+                exposures_all.append(exposures_g)
+                errors_all.append(errors_g)
+                kl_errors_all.append(kl_errors_g)
+                
+            exposures = np.stack(exposures_all, axis=1) # (N, G, R)
+            errors = np.stack(errors_all, axis=0)       # (G, R)
+            kl_errors = np.stack(kl_errors_all, axis=0) # (G, R)
+            
+        else:
+            m = m.flatten()
+            if mutation_count is None:
+                if all(is_wholenumber(val) for val in m):
+                    mutation_count = int(m.sum())
                 else:
                     raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
-        else:
-            if isinstance(mutation_count, (int, float, np.integer)):
-                mutation_count = [int(mutation_count)] * G
-
-        m = m / m.sum(axis=0)
-        
-        def bootstrap_sample_col(m_col, mc, K):
-            mutations_sampled = np.random.choice(K, size=mc, p=m_col)
-            return np.bincount(mutations_sampled, minlength=K) / mc
+    
+            m = m / np.sum(m)
+    
+            def bootstrap_sample(m, mutation_count, K):
+                mutations_sampled = np.random.choice(K, size=mutation_count, p=m)
+                return np.bincount(mutations_sampled, minlength=K) / mutation_count
+    
+            m_samples = [bootstrap_sample(m, mutation_count, K) for _ in range(R)]
+            tasks = [(samp, P, decomposition_method) for samp in m_samples]
+            exposures = np.column_stack(pool.map(_run_bootstrap_replicate, tasks))
             
-        exposures_all = []
-        errors_all = []
-        kl_errors_all = []
-        
-        for g in range(G):
-            exposures_g = np.column_stack([
-                decomposition_method(bootstrap_sample_col(m[:, g], mutation_count[g], K), P) for _ in range(R)
-            ])
-            # normalize sum
-            expos_sum = np.sum(exposures_g, axis=0)
-            expos_sum[expos_sum == 0] = 1.0 # prevent division by zero
-            exposures_g = exposures_g / expos_sum
+            exposures = exposures / np.sum(exposures, axis=0)
+    
+            errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
             
-            errors_g = np.vectorize(lambda i: FrobeniusNorm(m[:, g], P, exposures_g[:, i]))(range(exposures_g.shape[1]))
-            
-            m_approx = P @ exposures_g
+            m_approx = P @ exposures
             eps = 1e-10
-            m_expanded = m[:, g][:, np.newaxis]
+            m_expanded = m[:, np.newaxis]
             kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
-            kl_errors_g = np.sum(kl_matrix, axis=0)
-            
-            exposures_all.append(exposures_g)
-            errors_all.append(errors_g)
-            kl_errors_all.append(kl_errors_g)
-            
-        exposures = np.stack(exposures_all, axis=1) # (N, G, R)
-        errors = np.stack(errors_all, axis=0)       # (G, R)
-        kl_errors = np.stack(kl_errors_all, axis=0) # (G, R)
-        
-    else:
-        m = m.flatten()
-        if mutation_count is None:
-            if all(is_wholenumber(val) for val in m):
-                mutation_count = int(m.sum())
-            else:
-                raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
-
-        m = m / np.sum(m)
-
-        def bootstrap_sample(m, mutation_count, K):
-            mutations_sampled = np.random.choice(K, size=mutation_count, p=m)
-            return np.bincount(mutations_sampled, minlength=K) / mutation_count
-
-        exposures = np.column_stack([
-            decomposition_method(bootstrap_sample(m, mutation_count, K), P) for _ in range(R)
-        ])
-        exposures = exposures / np.sum(exposures, axis=0)
-
-        errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
-        
-        m_approx = P @ exposures
-        eps = 1e-10
-        m_expanded = m[:, np.newaxis]
-        kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
-        kl_errors = np.sum(kl_matrix, axis=0)
+            kl_errors = np.sum(kl_matrix, axis=0)
 
     return exposures, errors, kl_errors
 
-def bootstrapPoissonSigExposures(m, P, R, mutation_count=None, decomposition_method=None):
+def bootstrapPoissonSigExposures(m, P, R, mutation_count=None, decomposition_method=None, n_jobs=-2):
     """
     Obtain the Poisson bootstrap distribution of signature exposures for a tumor sample.
 
@@ -165,85 +180,95 @@ def bootstrapPoissonSigExposures(m, P, R, mutation_count=None, decomposition_met
 
     K = m.shape[0]  # number of mutation types
     
-    if is_2d:
-        G = m.shape[1]
-        if mutation_count is None:
-            mutation_count = []
+    if n_jobs == -1:
+        processes = min(R, mp.cpu_count())
+    elif n_jobs == -2:
+        processes = min(R, max(1, mp.cpu_count() // 2))
+    else:
+        processes = min(R, max(1, n_jobs))
+
+    with mp.Pool(processes=processes) as pool:
+        if is_2d:
+            G = m.shape[1]
+            if mutation_count is None:
+                mutation_count = []
+                for g in range(G):
+                    if all(is_wholenumber(val) for val in m[:, g]):
+                        mutation_count.append(int(m[:, g].sum()))
+                    else:
+                        raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
+            else:
+                if isinstance(mutation_count, (int, float, np.integer)):
+                    mutation_count = [int(mutation_count)] * G
+    
+            m = m / m.sum(axis=0)
+            
+            def bootstrap_poisson_sample_col(m_col, mc, K):
+                sampled_counts = np.random.poisson(m_col * mc)
+                sampled_sum = sampled_counts.sum()
+                if sampled_sum == 0:
+                    sampled_sum = 1.0 # prevent division by zero
+                return sampled_counts / sampled_sum
+                
+            exposures_all = []
+            errors_all = []
+            kl_errors_all = []
+            
             for g in range(G):
-                if all(is_wholenumber(val) for val in m[:, g]):
-                    mutation_count.append(int(m[:, g].sum()))
+                m_samples = [bootstrap_poisson_sample_col(m[:, g], mutation_count[g], K) for _ in range(R)]
+                tasks = [(samp, P, decomposition_method) for samp in m_samples]
+                exposures_g = np.column_stack(pool.map(_run_bootstrap_replicate, tasks))
+                
+                # normalize sum
+                expos_sum = np.sum(exposures_g, axis=0)
+                expos_sum[expos_sum == 0] = 1.0 # prevent division by zero
+                exposures_g = exposures_g / expos_sum
+                
+                errors_g = np.vectorize(lambda i: FrobeniusNorm(m[:, g], P, exposures_g[:, i]))(range(exposures_g.shape[1]))
+                
+                m_approx = P @ exposures_g
+                eps = 1e-10
+                m_expanded = m[:, g][:, np.newaxis]
+                kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
+                kl_errors_g = np.sum(kl_matrix, axis=0)
+                
+                exposures_all.append(exposures_g)
+                errors_all.append(errors_g)
+                kl_errors_all.append(kl_errors_g)
+                
+            exposures = np.stack(exposures_all, axis=1) # (N, G, R)
+            errors = np.stack(errors_all, axis=0)       # (G, R)
+            kl_errors = np.stack(kl_errors_all, axis=0) # (G, R)
+            
+        else:
+            m = m.flatten()
+            if mutation_count is None:
+                if all(is_wholenumber(val) for val in m):
+                    mutation_count = int(m.sum())
                 else:
                     raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
-        else:
-            if isinstance(mutation_count, (int, float, np.integer)):
-                mutation_count = [int(mutation_count)] * G
-
-        m = m / m.sum(axis=0)
-        
-        def bootstrap_poisson_sample_col(m_col, mc, K):
-            sampled_counts = np.random.poisson(m_col * mc)
-            sampled_sum = sampled_counts.sum()
-            if sampled_sum == 0:
-                sampled_sum = 1.0 # prevent division by zero
-            return sampled_counts / sampled_sum
+    
+            m = m / np.sum(m)
+    
+            def bootstrap_poisson_sample(m, mutation_count, K):
+                sampled_counts = np.random.poisson(m * mutation_count)
+                sampled_sum = sampled_counts.sum()
+                if sampled_sum == 0:
+                    sampled_sum = 1.0
+                return sampled_counts / sampled_sum
+    
+            m_samples = [bootstrap_poisson_sample(m, mutation_count, K) for _ in range(R)]
+            tasks = [(samp, P, decomposition_method) for samp in m_samples]
+            exposures = np.column_stack(pool.map(_run_bootstrap_replicate, tasks))
             
-        exposures_all = []
-        errors_all = []
-        kl_errors_all = []
-        
-        for g in range(G):
-            exposures_g = np.column_stack([
-                decomposition_method(bootstrap_poisson_sample_col(m[:, g], mutation_count[g], K), P) for _ in range(R)
-            ])
-            # normalize sum
-            expos_sum = np.sum(exposures_g, axis=0)
-            expos_sum[expos_sum == 0] = 1.0 # prevent division by zero
-            exposures_g = exposures_g / expos_sum
+            exposures = exposures / np.sum(exposures, axis=0)
+    
+            errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
             
-            errors_g = np.vectorize(lambda i: FrobeniusNorm(m[:, g], P, exposures_g[:, i]))(range(exposures_g.shape[1]))
-            
-            m_approx = P @ exposures_g
+            m_approx = P @ exposures
             eps = 1e-10
-            m_expanded = m[:, g][:, np.newaxis]
+            m_expanded = m[:, np.newaxis]
             kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
-            kl_errors_g = np.sum(kl_matrix, axis=0)
-            
-            exposures_all.append(exposures_g)
-            errors_all.append(errors_g)
-            kl_errors_all.append(kl_errors_g)
-            
-        exposures = np.stack(exposures_all, axis=1) # (N, G, R)
-        errors = np.stack(errors_all, axis=0)       # (G, R)
-        kl_errors = np.stack(kl_errors_all, axis=0) # (G, R)
-        
-    else:
-        m = m.flatten()
-        if mutation_count is None:
-            if all(is_wholenumber(val) for val in m):
-                mutation_count = int(m.sum())
-            else:
-                raise ValueError("Please specify the parameter 'mutation_count' or provide mutation counts in parameter 'm'.")
-
-        m = m / np.sum(m)
-
-        def bootstrap_poisson_sample(m, mutation_count, K):
-            sampled_counts = np.random.poisson(m * mutation_count)
-            sampled_sum = sampled_counts.sum()
-            if sampled_sum == 0:
-                sampled_sum = 1.0
-            return sampled_counts / sampled_sum
-
-        exposures = np.column_stack([
-            decomposition_method(bootstrap_poisson_sample(m, mutation_count, K), P) for _ in range(R)
-        ])
-        exposures = exposures / np.sum(exposures, axis=0)
-
-        errors = np.vectorize(lambda i: FrobeniusNorm(m, P, exposures[:, i]))(range(exposures.shape[1]))
-        
-        m_approx = P @ exposures
-        eps = 1e-10
-        m_expanded = m[:, np.newaxis]
-        kl_matrix = m_expanded * np.log((m_expanded + eps) / (m_approx + eps)) - m_expanded + m_approx
-        kl_errors = np.sum(kl_matrix, axis=0)
+            kl_errors = np.sum(kl_matrix, axis=0)
 
     return exposures, errors, kl_errors

@@ -12,7 +12,7 @@ from sigconfide.estimates.standard import findSigExposures
 from sigconfide.decompose.qp import decomposeQP
 from SigProfilerAssignment import Analyzer as Analyze
 
-def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="synthetic2700_all"):
+def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="synthetic2700_all", run_hybrid=0):
     out_path = os.path.join("comparison_output", output_dir)
     os.makedirs(out_path, exist_ok=True)
     
@@ -90,24 +90,37 @@ def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="
     E_reg, E_reg_whole, P_reg, P_reg_whole, kl_reg, kl_reg_whole, _, _ = sample_sfs(
         M_norm, P, E_opt_whole_all, max_iter=20000, check=500, eps=1e-10
     )
-    print("  Running Bootstrap SFS (Hybrid)...", flush=True)
-    E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
-        M_norm, P, E_opt_whole_all, R=10, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
-    )
-        
-    E_sfs_all = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
-    E_sfs_whole_all = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
-    
-    E_reg_whole_all = E_reg_whole
-    E_bs_whole_all = E_bs_whole
-
-    P_sfs_all = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
-    P_sfs_whole_all = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
-    kl_errors_sfs_all = np.concatenate([[kl_reg], kl_bs])
-    kl_errors_sfs_whole_all = np.concatenate([kl_reg_whole, kl_bs_whole])
-    n_reg_sfs_whole_all = E_reg_whole.shape[-1]
     t1_sfs = time.time()
     print(f"  [SFS completed in {t1_sfs - t0_sfs:.2f} seconds]", flush=True)
+
+    E_reg_whole_all = E_reg_whole
+    
+    if run_hybrid == 1:
+        print("  Running Bootstrap SFS (Hybrid)...", flush=True)
+        t0_hybrid = time.time()
+        E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
+            M_norm, P, E_opt_whole_all, R=10, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
+        )
+        t1_hybrid = time.time()
+        print(f"  [Bootstrap SFS (Hybrid) completed in {t1_hybrid - t0_hybrid:.2f} seconds]", flush=True)
+            
+        E_sfs_all = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
+        E_sfs_whole_all = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
+        
+        E_bs_whole_all = E_bs_whole
+
+        P_sfs_all = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
+        P_sfs_whole_all = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
+        kl_errors_sfs_all = np.concatenate([[kl_reg], kl_bs])
+        kl_errors_sfs_whole_all = np.concatenate([kl_reg_whole, kl_bs_whole])
+    else:
+        E_sfs_all = np.expand_dims(E_reg, axis=-1)
+        E_sfs_whole_all = E_reg_whole
+        P_sfs_all = np.expand_dims(P_reg, axis=-1)
+        P_sfs_whole_all = P_reg_whole
+        kl_errors_sfs_all = np.array([kl_reg])
+        kl_errors_sfs_whole_all = kl_reg_whole
+    n_reg_sfs_whole_all = E_reg_whole.shape[-1]
     
     print("  Running SigProfilerAssignment...", flush=True)
     spa_output_dir = os.path.join(out_path, "spa_output")
@@ -237,20 +250,24 @@ def compute_comparison_synthetic(sample_file, sig_file, truth_file, output_dir="
 
     # Save global matrices
     global_data_path = os.path.join(out_path, "global_computed_data.npz")
-    np.savez(global_data_path,
-             E_opt_whole_all=E_opt_whole_all,
-             E_truth_whole_all=E_truth_whole_all,
-             E_reg_whole_all=E_reg_whole_all,
-             E_bs_whole_all=E_bs_whole_all,
-             E_boot_pois_whole=E_boot_pois_whole,
-             E_spa_whole_all=E_spa_whole_all,
-             P_original=P,
-             P_sfs_whole_all=P_sfs_whole_all,
-             M_norm=M_norm,
-             kl_errors_sfs_whole_all=kl_errors_sfs_whole_all,
-             n_reg_sfs_whole=n_reg_sfs_whole_all,
-             sig_names_filtered=sig_names_filtered,
-             patient_names=patient_names)
+    save_dict = dict(
+        E_opt_whole_all=E_opt_whole_all,
+        E_truth_whole_all=E_truth_whole_all,
+        E_reg_whole_all=E_reg_whole_all,
+        E_boot_pois_whole=E_boot_pois_whole,
+        E_spa_whole_all=E_spa_whole_all,
+        P_original=P,
+        P_sfs_whole_all=P_sfs_whole_all,
+        M_norm=M_norm,
+        kl_errors_sfs_whole_all=kl_errors_sfs_whole_all,
+        n_reg_sfs_whole=n_reg_sfs_whole_all,
+        sig_names_filtered=sig_names_filtered,
+        patient_names=patient_names
+    )
+    if run_hybrid == 1:
+        save_dict['E_bs_whole_all'] = E_bs_whole_all
+        
+    np.savez(global_data_path, **save_dict)
     print(f"  Saved global data to {global_data_path}", flush=True)
 
     end_time = time.time()
@@ -262,6 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--sig_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/COSMIC_v3.3_SBS_GRCh37.txt", help="Path to signatures file")
     parser.add_argument("--truth_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/ground.truth.syn.exposures.csv", help="Path to ground truth exposures")
     parser.add_argument("--output_dir", default="synthetic2700_all", help="Output directory")
+    parser.add_argument("--hybrid", type=int, default=0, help="Run hybrid bootstrap SFS (1) or skip it (0)")
     
     args = parser.parse_args()
-    compute_comparison_synthetic(args.sample_file, args.sig_file, args.truth_file, args.output_dir)
+    compute_comparison_synthetic(args.sample_file, args.sig_file, args.truth_file, args.output_dir, args.hybrid)

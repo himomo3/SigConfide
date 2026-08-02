@@ -9,11 +9,11 @@ from sigconfide.estimates.bootstrap import bootstrapSigExposures, bootstrapPoiss
 from sigconfide.estimates.sfs import sample_sfs, bootstrap_sfs, bootstrap_poisson_sfs
 from sigconfide.estimates.standard import findSigExposures
 from sigconfide.decompose.qp import decomposeQP
+from SigProfilerAssignment import Analyzer as Analyze
+import pandas as pd
 
-def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="comparison_output", bootstrap_type="all"):
-    base_sample = os.path.splitext(os.path.basename(sample_file))[0]
-    parent_folder = f"{base_sample}_{bootstrap_type}BS"
-    out_path = os.path.join(output_dir, parent_folder)
+def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="brca560", bootstrap_type="poisson", run_hybrid=False, run_spa=True):
+    out_path = os.path.join("comparison_output", output_dir)
     
     start_time = time.time()    
     os.makedirs(out_path, exist_ok=True)
@@ -67,39 +67,59 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
         print("  Running Optimal...")
         E_opt_whole_all, frob_opt_whole_all = findSigExposures(M, P)
         
-        print("  Running Bootstrap (Regular)...")
-        t0_boot = time.time()
         R_boot = 1000
-        E_boot_reg_whole, frob_errs_boot_reg_whole, kl_errs_boot_reg_whole = bootstrapSigExposures(
-            M, P, R_boot, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP
-        )
-        print("  Running Bootstrap (Poisson)...")
-        E_boot_pois_whole, frob_errs_boot_pois_whole, kl_errs_boot_pois_whole = bootstrapPoissonSigExposures(
-            M, P, R_boot, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP
-        )
-        t1_boot = time.time()
-        print(f"  [Bootstraps completed in {t1_boot - t0_boot:.2f} seconds]")
+        
+        if bootstrap_type in ["regular", "all"]:
+            print("  Running Bootstrap (Regular)...")
+            t0_boot = time.time()
+            E_boot_reg_whole, frob_errs_boot_reg_whole, kl_errs_boot_reg_whole = bootstrapSigExposures(
+                M, P, R_boot, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP
+            )
+            t1_boot = time.time()
+            print(f"  [Regular Bootstrap completed in {t1_boot - t0_boot:.2f} seconds]")
+
+        if bootstrap_type in ["poisson", "all"]:
+            print("  Running Bootstrap (Poisson)...")
+            t0_boot = time.time()
+            E_boot_pois_whole, frob_errs_boot_pois_whole, kl_errs_boot_pois_whole = bootstrapPoissonSigExposures(
+                M, P, R_boot, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP
+            )
+            t1_boot = time.time()
+            print(f"  [Poisson Bootstrap completed in {t1_boot - t0_boot:.2f} seconds]")
         
         print("  Running SFS...")
         t0_sfs = time.time()
         E_reg, E_reg_whole, P_reg, P_reg_whole, kl_reg, kl_reg_whole, _, _ = sample_sfs(
             M_norm, P, E_opt_whole_all, max_iter=20000, check=500, eps=1e-10
         )
-        print("  Running Bootstrap SFS (Hybrid)...")
-        E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
-            M_norm, P, E_opt_whole_all, R=10, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
-        )
-            
-        E_sfs_all = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
-        E_sfs_whole_all = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
         
-        E_reg_whole_all = E_reg_whole
-        E_bs_whole_all = E_bs_whole
+        if run_hybrid:
+            print("  Running Bootstrap SFS (Hybrid)...")
+            E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
+                M_norm, P, E_opt_whole_all, R=10, mutation_count=list(mutation_counts_all), decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
+            )
+                
+            E_sfs_all = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
+            E_sfs_whole_all = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
+            
+            E_reg_whole_all = E_reg_whole
+            E_bs_whole_all = E_bs_whole
 
-        P_sfs_all = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
-        P_sfs_whole_all = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
-        kl_errors_sfs_all = np.concatenate([[kl_reg], kl_bs])
-        kl_errors_sfs_whole_all = np.concatenate([kl_reg_whole, kl_bs_whole])
+            P_sfs_all = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
+            P_sfs_whole_all = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
+            kl_errors_sfs_all = np.concatenate([[kl_reg], kl_bs])
+            kl_errors_sfs_whole_all = np.concatenate([kl_reg_whole, kl_bs_whole])
+        else:
+            E_sfs_all = np.expand_dims(E_reg, axis=-1)
+            E_sfs_whole_all = E_reg_whole
+            E_reg_whole_all = E_reg_whole
+            E_bs_whole_all = np.zeros((*E_reg_whole.shape[:-1], 0))
+
+            P_sfs_all = np.expand_dims(P_reg, axis=-1)
+            P_sfs_whole_all = P_reg_whole
+            kl_errors_sfs_all = np.array([kl_reg])
+            kl_errors_sfs_whole_all = kl_reg_whole
+
         n_reg_sfs_whole_all = E_reg_whole.shape[-1]
         t1_sfs = time.time()
         print(f"  [SFS completed in {t1_sfs - t0_sfs:.2f} seconds]")
@@ -112,6 +132,39 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
                  M_norm=M_norm,
                  n_reg_sfs_whole=n_reg_sfs_whole_all)
         print(f"  Saved global data to {global_data_path}")
+        
+    if run_spa:
+        print("  Running SigProfilerAssignment...", flush=True)
+        spa_output_dir = os.path.join(out_path, "spa_output")
+        try:
+            Analyze.cosmic_fit(
+                samples=sample_file,
+                output=spa_output_dir,
+                input_type="matrix",
+                signature_database=sig_file,
+                genome_build="GRCh37",
+                make_plots=False,
+                verbose=False
+            )
+            
+            spa_activities_path = os.path.join(spa_output_dir, "Assignment_Solution", "Activities", "Assignment_Solution_Activities.txt")
+            spa_df = pd.read_csv(spa_activities_path, sep="\t", index_col=0)
+            
+            original_target_names = [sig_names[idx] for idx in target_indices]
+            E_spa_whole_all = np.zeros((len(target_indices), len(patient_names)))
+            for i, orig_sig in enumerate(original_target_names):
+                if orig_sig in spa_df.columns:
+                    for j, pat in enumerate(patient_names):
+                        if pat in spa_df.index:
+                            E_spa_whole_all[i, j] = spa_df.loc[pat, orig_sig]
+            
+            # Normalize SPA exposures to 0-1 proportions
+            spa_sums = E_spa_whole_all.sum(axis=0)
+            E_spa_whole_all = np.divide(E_spa_whole_all, spa_sums, out=np.zeros_like(E_spa_whole_all), where=spa_sums!=0)
+        except Exception as e:
+            print(f"  [SPA failed: {e}]", flush=True)
+            E_spa_whole_all = np.zeros((len(target_indices), len(patient_names)))
+            run_spa = False
     
     for pt in patients:
         print(f"Processing patient {pt}")
@@ -143,10 +196,13 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
             E_opt = E_opt_whole_all[:, pt_idx]
             frob_opt = frob_opt_whole_all[pt_idx]
             
-            E_boot_reg = E_boot_reg_whole[:, pt_idx, :]
-            E_boot_pois = E_boot_pois_whole[:, pt_idx, :]
-            kl_errs_boot = kl_errs_boot_reg_whole[pt_idx, :]
-            kl_errs_boot_pois = kl_errs_boot_pois_whole[pt_idx, :]
+            if bootstrap_type in ["regular", "all"]:
+                E_boot_reg = E_boot_reg_whole[:, pt_idx, :]
+                kl_errs_boot = kl_errs_boot_reg_whole[pt_idx, :]
+            
+            if bootstrap_type in ["poisson", "all"]:
+                E_boot_pois = E_boot_pois_whole[:, pt_idx, :]
+                kl_errs_boot_pois = kl_errs_boot_pois_whole[pt_idx, :]
             
             E_sfs = E_sfs_all[:, pt_idx, :]
             E_sfs_whole = E_sfs_whole_all[:, pt_idx, :]
@@ -175,34 +231,49 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
             E_opt = E_opt_all_pt[:, 0]
             frob_opt = frob_opt_all_pt[0]
             
-            print(f"  Running Bootstrap (Regular)...")
             R_boot = 1000
-            E_boot_reg, frob_errs_boot_reg, kl_errs_boot = bootstrapSigExposures(
-                m, P, R_boot, mutation_count=mutation_count, decomposition_method=decomposeQP
-            )
-            print(f"  Running Bootstrap (Poisson)...")
-            E_boot_pois, frob_errs_boot_pois, kl_errs_boot_pois = bootstrapPoissonSigExposures(
-                m, P, R_boot, mutation_count=mutation_count, decomposition_method=decomposeQP
-            )
+            if bootstrap_type in ["regular", "all"]:
+                print(f"  Running Bootstrap (Regular)...")
+                E_boot_reg, frob_errs_boot_reg, kl_errs_boot = bootstrapSigExposures(
+                    m, P, R_boot, mutation_count=mutation_count, decomposition_method=decomposeQP
+                )
+            if bootstrap_type in ["poisson", "all"]:
+                print(f"  Running Bootstrap (Poisson)...")
+                E_boot_pois, frob_errs_boot_pois, kl_errs_boot_pois = bootstrapPoissonSigExposures(
+                    m, P, R_boot, mutation_count=mutation_count, decomposition_method=decomposeQP
+                )
             
             print(f"  Running SFS...")
             E_reg, E_reg_whole, P_reg, P_reg_whole, kl_reg, kl_reg_whole, _, _ = sample_sfs(
                 m_norm, P, E_opt, max_iter=20000, check=500, eps=1e-10
             )
-            print(f"  Running Bootstrap SFS (Hybrid)...")
-            E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
-                m_norm, P, E_opt, R=10, mutation_count=mutation_count, decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
-            )
-                
-            E_sfs = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
-            E_sfs_whole = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
-            E_sfs_reg_whole = E_reg_whole
-            E_sfs_bs_whole = E_bs_whole
             
-            P_sfs = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
-            P_sfs_whole = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
-            kl_errors_sfs = np.concatenate([[kl_reg], kl_bs])
-            kl_errors_sfs_whole = np.concatenate([kl_reg_whole, kl_bs_whole])
+            if run_hybrid:
+                print(f"  Running Bootstrap SFS (Hybrid)...")
+                E_bs, E_bs_whole, P_bs, P_bs_whole, kl_bs, kl_bs_whole, _, _ = bootstrap_sfs(
+                    m_norm, P, E_opt, R=10, mutation_count=mutation_count, decomposition_method=decomposeQP, max_iter=20000, check=500, eps=1e-10
+                )
+                    
+                E_sfs = np.concatenate([np.expand_dims(E_reg, axis=-1), E_bs], axis=-1)
+                E_sfs_whole = np.concatenate([E_reg_whole, E_bs_whole], axis=-1)
+                E_sfs_reg_whole = E_reg_whole
+                E_sfs_bs_whole = E_bs_whole
+                
+                P_sfs = np.concatenate([np.expand_dims(P_reg, axis=-1), P_bs], axis=-1)
+                P_sfs_whole = np.concatenate([P_reg_whole, P_bs_whole], axis=-1)
+                kl_errors_sfs = np.concatenate([[kl_reg], kl_bs])
+                kl_errors_sfs_whole = np.concatenate([kl_reg_whole, kl_bs_whole])
+            else:
+                E_sfs = np.expand_dims(E_reg, axis=-1)
+                E_sfs_whole = E_reg_whole
+                E_sfs_reg_whole = E_reg_whole
+                E_sfs_bs_whole = np.zeros((*E_reg_whole.shape[:-1], 0))
+                
+                P_sfs = np.expand_dims(P_reg, axis=-1)
+                P_sfs_whole = P_reg_whole
+                kl_errors_sfs = np.array([kl_reg])
+                kl_errors_sfs_whole = kl_reg_whole
+                
             n_reg_sfs_whole = E_reg_whole.shape[-1]
         
         if len(kl_errors_sfs) == 0:
@@ -214,24 +285,36 @@ def compute_comparison(sample_file, sig_file, patients, whole=True, output_dir="
         # Opt errors for baseline relative calculations
         kl_opt = kl_divergence(m_norm, P @ E_opt)
         
+        if run_spa:
+            E_spa = E_spa_whole_all[:, pt_idx]
+        else:
+            E_spa = None
+        
         # Save computed data to npz for later visualisation
         data_path = os.path.join(pt_dir, "computed_data.npz")
-        np.savez(data_path,
+        save_dict = dict(
                  E_sfs=E_sfs,
                  E_sfs_whole=E_sfs_whole,
                  P_sfs=P_sfs,
                  P_sfs_whole=P_sfs_whole,
-                 E_boot_reg=E_boot_reg,
-                 E_boot_pois=E_boot_pois,
                  E_sfs_reg_whole=E_sfs_reg_whole,
                  E_sfs_bs_whole=E_sfs_bs_whole,
                  E_opt=E_opt,
                  kl_errors_sfs=kl_errors_sfs,
                  kl_errors_sfs_whole=kl_errors_sfs_whole,
-                 kl_errs_boot=kl_errs_boot,
-                 kl_errs_boot_pois=kl_errs_boot_pois,
                  sig_names_filtered=sig_names_filtered,
-                 n_reg_sfs_whole=n_reg_sfs_whole)
+                 n_reg_sfs_whole=n_reg_sfs_whole
+        )
+        if bootstrap_type in ["regular", "all"]:
+            save_dict["E_boot_reg"] = E_boot_reg
+            save_dict["kl_errs_boot"] = kl_errs_boot
+        if bootstrap_type in ["poisson", "all"]:
+            save_dict["E_boot_pois"] = E_boot_pois
+            save_dict["kl_errs_boot_pois"] = kl_errs_boot_pois
+        if run_spa and E_spa is not None:
+            save_dict["E_spa"] = E_spa
+        
+        np.savez(data_path, **save_dict)
         print(f"  Saved computation results to {data_path}")
 
     end_time = time.time()
@@ -242,10 +325,12 @@ if __name__ == "__main__":
     parser.add_argument("--sample_file", default="tests/data/tumorBRCA.txt", help="Path to sample file")
     parser.add_argument("--sig_file", default="sigconfide/utils/data/COSMIC_v2_SBS_GRCh37.txt", help="Path to signatures file")
     parser.add_argument("--patients", nargs="+", default=["PD24196", "PD8609", "PD13608"], help="List of patients")
-    parser.add_argument("--output_dir", default="comparison_output", help="Output directory")
-    parser.add_argument("--bootstrap_type", choices=["regular", "poisson", "all"], default="all", help="Bootstrap type (legacy param, defaults to all)")
+    parser.add_argument("--output_dir", default="brca560", help="Output directory inside comparison_output")
+    parser.add_argument("--bootstrap_type", choices=["regular", "poisson", "all", "none"], default="poisson", help="Bootstrap type (defaults to poisson)")
+    parser.add_argument("--hybrid", action="store_true", help="Run hybrid bootstrap SFS")
+    parser.add_argument("--no-spa", dest="run_spa", action="store_false", help="Disable SigProfilerAssignment")
     parser.add_argument("--whole", action="store_true", default=True, help="Compute on whole matrix (default: True)")
     parser.add_argument("--no-whole", dest="whole", action="store_false", help="Compute per patient")
     
     args = parser.parse_args()
-    compute_comparison(args.sample_file, args.sig_file, args.patients, args.whole, args.output_dir, args.bootstrap_type)
+    compute_comparison(args.sample_file, args.sig_file, args.patients, args.whole, args.output_dir, args.bootstrap_type, args.hybrid, args.run_spa)

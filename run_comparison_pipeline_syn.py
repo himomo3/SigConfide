@@ -9,6 +9,7 @@ def main():
     parser.add_argument("--output_dirs", nargs="+", default=["synthetic2700_all"], help="Output directories corresponding to sample files")
     parser.add_argument("--sig_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/COSMIC_v3.3_SBS_GRCh37.txt", help="Path to signatures file")
     parser.add_argument("--truth_file", default="tests/data/Supplementary_data_Diaz-Gay_et_al_2023_Benchmark/SBS/ground.truth.syn.exposures.csv", help="Path to ground truth exposures")
+    parser.add_argument("--hybrid", action="store_true", help="Run hybrid bootstrap SFS")
     
     args = parser.parse_args()
     
@@ -31,7 +32,8 @@ def main():
             "--sample_file", sample_file,
             "--sig_file", args.sig_file,
             "--truth_file", args.truth_file,
-            "--output_dir", output_dir
+            "--output_dir", output_dir,
+            "--hybrid", "1" if args.hybrid else "0"
         ]
         
         result_compute = subprocess.run(compute_cmd)

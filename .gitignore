@@ -65,3 +65,4 @@ doxygen_sqlite3.db
 *.npz
 comparison_output/
 Lib
+tests/data/synthetic_data_Rozen/SBS/intermed_results/SBS_syn_data_distribution.pdf

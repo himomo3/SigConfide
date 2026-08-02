@@ -1,4 +1,5 @@
 import numpy as np
+import multiprocessing as mp
 from sigconfide.utils.utils import kl_divergence, FrobeniusNorm
 def _amat(lambda_val, s, smix, N):
     """
@@ -154,7 +155,7 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
             P_min = P_min_batch
             P_max = P_max_batch
             
-            if (diffnew - diffold) < eps:
+            if abs(diffnew - diffold) < eps:
                 break
             else:
                 diffold = diffnew
@@ -181,7 +182,12 @@ def sample_sfs(m, P, E, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
             
     return E_final, E_whole, P_final, P_whole, kl_errors_final, kl_errors_whole, frob_errors_final, frob_errors_whole
 
-def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
+def _run_sample_sfs_replicate(args):
+    """Helper function to run sample_sfs for a single replicate."""
+    m, P, E_r, max_iter, check, beta, eps = args
+    return sample_sfs(m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps)
+
+def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=30000, check=1000, beta=0.5, eps=1e-8, n_jobs=-2):
     """
     Combines bootstrap and SFS methods by generating bootstrap replicates of exposures
     and running SFS on each replicate.
@@ -189,6 +195,24 @@ def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None,
     from sigconfide.estimates.bootstrap import bootstrapSigExposures
 
     E_boot, _, _ = bootstrapSigExposures(m, P, R, mutation_count=mutation_count, decomposition_method=decomposition_method)
+
+    tasks = []
+    for r in range(R):
+        if E_boot.ndim == 3:
+            E_r = E_boot[:, :, r]
+        else:
+            E_r = E_boot[:, r]
+        tasks.append((m, P, E_r, max_iter, check, beta, eps))
+
+    if n_jobs == -1:
+        processes = min(R, mp.cpu_count())
+    elif n_jobs == -2:
+        processes = min(R, max(1, mp.cpu_count() // 2))
+    else:
+        processes = min(R, max(1, n_jobs))
+
+    with mp.Pool(processes=processes) as pool:
+        results = pool.map(_run_sample_sfs_replicate, tasks)
 
     all_E = []
     all_E_whole = []
@@ -199,16 +223,8 @@ def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None,
     all_frob = []
     all_frob_whole = []
 
-    for r in range(R):
-        if E_boot.ndim == 3:
-            E_r = E_boot[:, :, r]
-        else:
-            E_r = E_boot[:, r]
-
-        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = sample_sfs(
-            m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps
-        )
-
+    for res in results:
+        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = res
         all_E.append(E_r_out)
         all_E_whole.append(E_whole_r)
         all_P.append(P_r)
@@ -230,7 +246,7 @@ def bootstrap_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None,
 
     return final_E, final_E_whole, final_P, final_P_whole, final_kl, final_kl_whole, final_frob, final_frob_whole
 
-def bootstrap_poisson_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=100000, check=1000, beta=0.5, eps=1e-10):
+def bootstrap_poisson_sfs(m, P, E, R=10, mutation_count=None, decomposition_method=None, max_iter=30000, check=1000, beta=0.5, eps=1e-8, n_jobs=-2):
     """
     Combines Poisson bootstrap and SFS methods by generating Poisson bootstrap replicates of exposures
     and running SFS on each replicate.
@@ -238,6 +254,22 @@ def bootstrap_poisson_sfs(m, P, E, R=10, mutation_count=None, decomposition_meth
     from sigconfide.estimates.bootstrap import bootstrapPoissonSigExposures
 
     E_boot, _, _ = bootstrapPoissonSigExposures(m, P, R, mutation_count=mutation_count, decomposition_method=decomposition_method)
+
+    tasks = []
+    for r in range(R):
+        if E_boot.ndim == 3:
+            E_r = E_boot[:, :, r]
+        else:
+            E_r = E_boot[:, r]
+        tasks.append((m, P, E_r, max_iter, check, beta, eps))
+
+    if n_jobs == -1:
+        processes = min(R, mp.cpu_count())
+    else:
+        processes = min(R, max(1, n_jobs))
+
+    with mp.Pool(processes=processes) as pool:
+        results = pool.map(_run_sample_sfs_replicate, tasks)
 
     all_E = []
     all_E_whole = []
@@ -248,16 +280,8 @@ def bootstrap_poisson_sfs(m, P, E, R=10, mutation_count=None, decomposition_meth
     all_frob = []
     all_frob_whole = []
 
-    for r in range(R):
-        if E_boot.ndim == 3:
-            E_r = E_boot[:, :, r]
-        else:
-            E_r = E_boot[:, r]
-
-        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = sample_sfs(
-            m, P, E_r, max_iter=max_iter, check=check, beta=beta, eps=eps
-        )
-
+    for res in results:
+        E_r_out, E_whole_r, P_r, P_whole_r, kl_r, kl_whole_r, frob_r, frob_whole_r = res
         all_E.append(E_r_out)
         all_E_whole.append(E_whole_r)
         all_P.append(P_r)

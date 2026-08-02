@@ -17,7 +17,11 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
     data = np.load(global_data_path)
     
     E_reg_whole_all = data['E_reg_whole_all']
-    E_bs_whole_all = data['E_bs_whole_all']
+    try:
+        E_bs_whole_all = data['E_bs_whole_all']
+        has_hybrid = True
+    except KeyError:
+        has_hybrid = False
     E_boot_pois_whole = data['E_boot_pois_whole']
     E_opt_whole_all = data['E_opt_whole_all']
     
@@ -118,7 +122,8 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
         os.makedirs(pt_dir, exist_ok=True)
         
         E_sfs_reg = E_reg_whole_all[:, pt_idx, :]
-        E_sfs_bs = E_bs_whole_all[:, pt_idx, :]
+        if has_hybrid:
+            E_sfs_bs = E_bs_whole_all[:, pt_idx, :]
         E_boot_pois = E_boot_pois_whole[:, pt_idx, :]
         E_opt = E_opt_whole_all[:, pt_idx]
         E_truth = E_truth_whole_all[:, pt_idx]
@@ -126,57 +131,83 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
         # 1. Element Bounds
         fig_bounds, ax_bounds = plt.subplots(figsize=(14, 6))
         x_bounds = np.arange(num_sigs)
-        width = 0.25
+        
+        if has_hybrid:
+            width = 0.25
+            pos_boot = x_bounds - width
+            pos_sfs = x_bounds
+            pos_hybrid = x_bounds + width
+            pos_opt = x_bounds - width
+            pos_truth = x_bounds
+            pos_spa = x_bounds + width
+        else:
+            width = 0.35
+            pos_boot = x_bounds - width/2
+            pos_sfs = x_bounds + width/2
+            pos_opt = x_bounds - width
+            pos_truth = x_bounds
+            pos_spa = x_bounds + width
         
         boot_pois_data = [E_boot_pois[i, :] for i in range(num_sigs)]
         sfs_reg_data = [E_sfs_reg[i, :] for i in range(num_sigs)]
-        sfs_bs_data = [E_sfs_bs[i, :] for i in range(num_sigs)]
+        if has_hybrid:
+            sfs_bs_data = [E_sfs_bs[i, :] for i in range(num_sigs)]
         
-        bp_boot_pois = ax_bounds.boxplot(boot_pois_data, positions=x_bounds - width, widths=width,
+        bp_boot_pois = ax_bounds.boxplot(boot_pois_data, positions=pos_boot, widths=width,
                                          patch_artist=True, showmeans=True, showfliers=False,
                                          meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5})
         for patch in bp_boot_pois['boxes']:
             patch.set_facecolor('lightcoral')
             patch.set_alpha(0.7)
             
-        bp_sfs_reg = ax_bounds.boxplot(sfs_reg_data, positions=x_bounds, widths=width,
+        bp_sfs_reg = ax_bounds.boxplot(sfs_reg_data, positions=pos_sfs, widths=width,
                                        patch_artist=True, showmeans=True, showfliers=False,
                                        meanprops={'marker':'o', 'markerfacecolor':'purple', 'markeredgecolor':'purple', 'markersize':5})
         for patch in bp_sfs_reg['boxes']:
             patch.set_facecolor('plum')
             patch.set_alpha(0.7)
 
-        bp_sfs_bs = ax_bounds.boxplot(sfs_bs_data, positions=x_bounds + width, widths=width,
-                                      patch_artist=True, showmeans=True, showfliers=False,
-                                      meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
-        for patch in bp_sfs_bs['boxes']:
-            patch.set_facecolor('lightblue')
-            patch.set_alpha(0.7)
+        if has_hybrid:
+            bp_sfs_bs = ax_bounds.boxplot(sfs_bs_data, positions=pos_hybrid, widths=width,
+                                          patch_artist=True, showmeans=True, showfliers=False,
+                                          meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
+            for patch in bp_sfs_bs['boxes']:
+                patch.set_facecolor('lightblue')
+                patch.set_alpha(0.7)
             
-        ax_bounds.plot(x_bounds - width, E_opt, '*', color='black', markersize=8, zorder=6)
-        ax_bounds.plot(x_bounds, E_truth, 'D', color='gold', markersize=8, markeredgecolor='black', zorder=5)
+        ax_bounds.plot(pos_opt, E_opt, '*', color='black', markersize=8, zorder=6)
+        ax_bounds.plot(pos_truth, E_truth, 'D', color='gold', markersize=8, markeredgecolor='black', zorder=5)
         
         legend_elements = [
             mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'),
-            mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS'),
-            mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'),
+            mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS')
+        ]
+        if has_hybrid:
+            legend_elements.append(mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'))
+            
+        legend_elements.extend([
             mlines.Line2D([0], [0], marker='o', color='w', label='Poisson Boot Mean', markerfacecolor='red', markersize=8),
-            mlines.Line2D([0], [0], marker='o', color='w', label='Original SFS Mean', markerfacecolor='purple', markersize=8),
-            mlines.Line2D([0], [0], marker='o', color='w', label='Hybrid SFS Mean', markerfacecolor='blue', markersize=8),
+            mlines.Line2D([0], [0], marker='o', color='w', label='Original SFS Mean', markerfacecolor='purple', markersize=8)
+        ])
+        
+        if has_hybrid:
+            legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w', label='Hybrid SFS Mean', markerfacecolor='blue', markersize=8))
+            
+        legend_elements.extend([
             mlines.Line2D([0], [0], marker='*', color='w', label='Original QP (E_opt)', markerfacecolor='black', markersize=12),
             mlines.Line2D([0], [0], marker='D', color='w', label='Ground Truth (E_truth)', markerfacecolor='gold', markeredgecolor='black', markersize=10)
-        ]
+        ])
         
         if has_spa:
             E_spa = E_spa_whole_all[:, pt_idx]
             if E_spa.ndim == 1 or E_spa.shape[1] == 1:
                 # Plot as singular green squares
-                ax_bounds.plot(x_bounds + width, E_spa.flatten(), 's', color='green', markersize=8, zorder=7)
+                ax_bounds.plot(pos_spa, E_spa.flatten(), 's', color='green', markersize=8, zorder=7)
                 legend_elements.append(mlines.Line2D([0], [0], marker='s', color='w', label='SigProfilerAssignment', markerfacecolor='green', markersize=10))
             else:
                 # Plot as green box plots
                 spa_data = [E_spa[i, :] for i in range(num_sigs)]
-                bp_spa = ax_bounds.boxplot(spa_data, positions=x_bounds + width, widths=width,
+                bp_spa = ax_bounds.boxplot(spa_data, positions=pos_spa, widths=width,
                                            patch_artist=True, showmeans=True, showfliers=False,
                                            meanprops={'marker':'s', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
                 for patch in bp_spa['boxes']:
@@ -195,22 +226,31 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
         
         # 2. Spatial PCA
         X_sfs_reg = E_sfs_reg.T
-        X_sfs_bs = E_sfs_bs.T
+        if has_hybrid:
+            X_sfs_bs = E_sfs_bs.T
         X_boot = E_boot_pois.T
         
-        X_all = np.vstack([X_sfs_reg, X_sfs_bs, X_boot])
+        if has_hybrid:
+            X_all = np.vstack([X_sfs_reg, X_sfs_bs, X_boot])
+        else:
+            X_all = np.vstack([X_sfs_reg, X_boot])
+            
         pca = PCA(n_components=2)
         X_pca = pca.fit_transform(X_all)
         
         idx_reg_end = len(X_sfs_reg)
-        idx_bs_end = idx_reg_end + len(X_sfs_bs)
         
         X_reg_sfs_pca = X_pca[:idx_reg_end]
-        X_bs_sfs_pca = X_pca[idx_reg_end:idx_bs_end]
-        X_boot_pca = X_pca[idx_bs_end:]
+        
+        if has_hybrid:
+            idx_bs_end = idx_reg_end + len(X_sfs_bs)
+            X_bs_sfs_pca = X_pca[idx_reg_end:idx_bs_end]
+            X_boot_pca = X_pca[idx_bs_end:]
+        else:
+            X_boot_pca = X_pca[idx_reg_end:]
         
         fig_pca, ax_pca = plt.subplots(figsize=(8, 8))
-        if len(X_bs_sfs_pca) > 0:
+        if has_hybrid and len(X_bs_sfs_pca) > 0:
             ax_pca.scatter(X_bs_sfs_pca[:, 0], X_bs_sfs_pca[:, 1], c='lightblue', label='Bootstrap SFS Samples', alpha=0.5, s=15, marker='o')
         if len(X_reg_sfs_pca) > 0:
             ax_pca.scatter(X_reg_sfs_pca[:, 0], X_reg_sfs_pca[:, 1], c='lime', label='Regular SFS Samples', alpha=0.8, s=20, marker='D', edgecolors='black', linewidths=0.5)
@@ -232,8 +272,12 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
         kl_errs_boot = np.sum(kl_boot, axis=0)
         
         # SFS error
-        E_sfs_all = np.hstack([E_sfs_reg, E_sfs_bs])
-        M_approx_sfs = np.sum(P_sfs_whole_all * E_sfs_all[None, :, :], axis=1)
+        if has_hybrid:
+            E_sfs_all = np.hstack([E_sfs_reg, E_sfs_bs])
+            M_approx_sfs = np.sum(P_sfs_whole_all * E_sfs_all[None, :, :], axis=1)
+        else:
+            E_sfs_all = E_sfs_reg
+            M_approx_sfs = np.sum(P_sfs_whole_all * E_sfs_all[None, :, :], axis=1)
         kl_sfs = M_pt[:, None] * np.log((M_pt[:, None] + eps) / (M_approx_sfs + eps)) - M_pt[:, None] + M_approx_sfs
         kl_errors_sfs = np.sum(kl_sfs, axis=0)
         
@@ -284,7 +328,7 @@ def generate_patient_plots(output_dir="synthetic2700_all", sample_file=None, pat
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic patient plots")
-    parser.add_argument("--output_dir", default="comparison_output/synthetic2700_all", help="Output directory")
+    parser.add_argument("--output_dir", default="synthetic2700_all", help="Output directory")
     parser.add_argument("--sample_file", default=None, help="Path to sample file to get names")
     parser.add_argument("--patient_list", default=None, help="Path to a text file containing a list of patients to plot")
     args = parser.parse_args()

@@ -19,7 +19,11 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
     
     E_opt_whole_all = data['E_opt_whole_all']
     E_reg_whole_all = data['E_reg_whole_all']
-    E_bs_whole_all = data['E_bs_whole_all']
+    try:
+        E_bs_whole_all = data['E_bs_whole_all']
+        has_hybrid = True
+    except KeyError:
+        has_hybrid = False
     E_boot_pois_whole = data['E_boot_pois_whole']
     
     try:
@@ -40,15 +44,30 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
     num_sigs = len(sig_names_filtered)
     diff_boot_pois = (E_boot_pois_whole - E_truth_whole_all[:, :, np.newaxis]).reshape(num_sigs, -1)
     diff_sfs_reg = (E_reg_whole_all - E_truth_whole_all[:, :, np.newaxis]).reshape(num_sigs, -1)
-    diff_sfs_bs = (E_bs_whole_all - E_truth_whole_all[:, :, np.newaxis]).reshape(num_sigs, -1)
+    if has_hybrid:
+        diff_sfs_bs = (E_bs_whole_all - E_truth_whole_all[:, :, np.newaxis]).reshape(num_sigs, -1)
 
     fig_diff_box, ax_diff_box = plt.subplots(figsize=(14, 6))
     x_bounds = np.arange(num_sigs)
-    width = 0.25
+    
+    if has_hybrid:
+        width = 0.25
+        pos_boot = x_bounds - width
+        pos_sfs = x_bounds
+        pos_hybrid = x_bounds + width
+        pos_opt = x_bounds - width/2
+        pos_spa = x_bounds + width/2
+    else:
+        width = 0.35
+        pos_boot = x_bounds - width/2
+        pos_sfs = x_bounds + width/2
+        pos_opt = x_bounds - width
+        pos_spa = x_bounds + width
     
     diff_boot_pois_data = [diff_boot_pois[i, :] for i in range(num_sigs)]
     diff_sfs_reg_data = [diff_sfs_reg[i, :] for i in range(num_sigs)]
-    diff_sfs_bs_data = [diff_sfs_bs[i, :] for i in range(num_sigs)]
+    if has_hybrid:
+        diff_sfs_bs_data = [diff_sfs_bs[i, :] for i in range(num_sigs)]
 
     diff_opt = E_opt_whole_all - E_truth_whole_all
     mean_diff_opt = np.mean(diff_opt, axis=1)
@@ -58,7 +77,7 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
         mean_diff_spa = np.mean(diff_spa, axis=1)
 
     flier_style = {'marker': ',', 'markersize': 0.5, 'alpha': 0.02, 'markeredgecolor': 'none', 'markerfacecolor': 'black'}
-    bp_diff_boot_pois = ax_diff_box.boxplot(diff_boot_pois_data, positions=x_bounds - width, widths=width,
+    bp_diff_boot_pois = ax_diff_box.boxplot(diff_boot_pois_data, positions=pos_boot, widths=width,
                                      patch_artist=True, showmeans=True, showfliers=True,
                                      meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5},
                                      flierprops=flier_style)
@@ -66,7 +85,7 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
         patch.set_facecolor('lightcoral')
         patch.set_alpha(0.7)
         
-    bp_diff_sfs_reg = ax_diff_box.boxplot(diff_sfs_reg_data, positions=x_bounds, widths=width,
+    bp_diff_sfs_reg = ax_diff_box.boxplot(diff_sfs_reg_data, positions=pos_sfs, widths=width,
                                    patch_artist=True, showmeans=True, showfliers=True,
                                    meanprops={'marker':'o', 'markerfacecolor':'purple', 'markeredgecolor':'purple', 'markersize':5},
                                    flierprops=flier_style)
@@ -74,19 +93,27 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
         patch.set_facecolor('plum')
         patch.set_alpha(0.7)
 
-    bp_diff_sfs_bs = ax_diff_box.boxplot(diff_sfs_bs_data, positions=x_bounds + width, widths=width,
-                                  patch_artist=True, showmeans=True, showfliers=True,
-                                  meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5},
-                                  flierprops=flier_style)
-    for patch in bp_diff_sfs_bs['boxes']:
-        patch.set_facecolor('lightblue')
-        patch.set_alpha(0.7)
+    if has_hybrid:
+        bp_diff_sfs_bs = ax_diff_box.boxplot(diff_sfs_bs_data, positions=pos_hybrid, widths=width,
+                                      patch_artist=True, showmeans=True, showfliers=True,
+                                      meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5},
+                                      flierprops=flier_style)
+        for patch in bp_diff_sfs_bs['boxes']:
+            patch.set_facecolor('lightblue')
+            patch.set_alpha(0.7)
         
-    ax_diff_box.plot(x_bounds - width/2, mean_diff_opt, '^', color='black', markersize=8, zorder=5)
+    ax_diff_box.plot(pos_opt, mean_diff_opt, '^', color='black', markersize=8, zorder=5)
     
     if has_spa:
-        ax_diff_box.plot(x_bounds + width/2, mean_diff_spa, 's', color='green', markersize=8, zorder=5)
-        
+        diff_spa_data = [diff_spa[i, :] for i in range(num_sigs)]
+        bp_diff_spa = ax_diff_box.boxplot(diff_spa_data, positions=pos_spa, widths=width,
+                                      patch_artist=True, showmeans=True, showfliers=True,
+                                      meanprops={'marker':'s', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5},
+                                      flierprops=flier_style)
+        for patch in bp_diff_spa['boxes']:
+            patch.set_facecolor('lightgreen')
+            patch.set_alpha(0.7)
+            
     ax_diff_box.axhline(0, color='black', linestyle='--', linewidth=1)
     ax_diff_box.set_xticks(x_bounds)
     ax_diff_box.set_xticklabels(sig_names_filtered, rotation=45, ha='right')
@@ -97,12 +124,13 @@ def visualise_comparison_synthetic(output_dir="synthetic2700_all"):
     import matplotlib.lines as mlines
     legend_elements_global = [
         mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'),
-        mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS'),
-        mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'),
-        mlines.Line2D([0], [0], marker='^', color='w', markerfacecolor='black', markersize=8, label='Optimal (QP Mean)')
+        mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS')
     ]
+    if has_hybrid:
+        legend_elements_global.append(mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'))
+    legend_elements_global.append(mlines.Line2D([0], [0], marker='^', color='w', markerfacecolor='black', markersize=8, label='Optimal (QP Mean)'))
     if has_spa:
-        legend_elements_global.append(mlines.Line2D([0], [0], marker='s', color='w', markerfacecolor='green', markersize=10, label='SigProfilerAssignment'))
+        legend_elements_global.append(mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='SigProfilerAssignment'))
     
     ax_diff_box.legend(handles=legend_elements_global, loc='upper right', bbox_to_anchor=(1.15, 1.05))
     plt.tight_layout()

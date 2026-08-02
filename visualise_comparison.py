@@ -4,10 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/COSMIC_v2_SBS_GRCh37.txt", bootstrap_type="regular", output_dir="comparison_output"):
-    base_sample = os.path.splitext(os.path.basename(sample_file))[0]
-    parent_folder = f"{base_sample}_{bootstrap_type}BS"
-    out_path = os.path.join(output_dir, parent_folder)
+def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/COSMIC_v2_SBS_GRCh37.txt", bootstrap_type="regular", output_dir="brca560"):
+    out_path = os.path.join("comparison_output", output_dir)
     
     global_diff_boot_reg = []
     global_diff_boot_pois = []
@@ -38,6 +36,7 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         P_sfs_whole = data['P_sfs_whole'] if 'P_sfs_whole' in data else None
         P_sfs = data['P_sfs'] if 'P_sfs' in data else None
         n_reg_sfs_whole = int(data['n_reg_sfs_whole']) if 'n_reg_sfs_whole' in data else 0
+        E_spa = data['E_spa'] if 'E_spa' in data else None
         
         # 1. Element-Wise Bounds vs Confidence Intervals (Boxplots)
         fig_bounds, ax_bounds = plt.subplots(figsize=(14, 6))
@@ -45,27 +44,29 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         x_bounds = np.arange(num_sigs)
         width = 0.2
         
-        boot_reg_data = [E_boot_reg[i, :] for i in range(num_sigs)]
-        boot_pois_data = [E_boot_pois[i, :] for i in range(num_sigs)]
+        boot_reg_data = [E_boot_reg[i, :] for i in range(num_sigs)] if E_boot_reg is not None else []
+        boot_pois_data = [E_boot_pois[i, :] for i in range(num_sigs)] if E_boot_pois is not None else []
         sfs_reg_data = [E_sfs_reg_whole[i, :] for i in range(num_sigs)]
-        sfs_bs_data = [E_sfs_bs_whole[i, :] for i in range(num_sigs)]
+        sfs_bs_data = [E_sfs_bs_whole[i, :] for i in range(num_sigs)] if E_sfs_bs_whole is not None else []
         
         # Regular Bootstrap Boxplots
-        bp_boot_reg = ax_bounds.boxplot(boot_reg_data, positions=x_bounds - 1.5*width, widths=width,
-                                        patch_artist=True, showmeans=True, showfliers=False,
-                                        meanprops={'marker':'o', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
-        for patch in bp_boot_reg['boxes']:
-            patch.set_facecolor('lightgreen')
-            patch.set_alpha(0.7)
+        if E_boot_reg is not None and E_boot_reg.shape[-1] > 0:
+            bp_boot_reg = ax_bounds.boxplot(boot_reg_data, positions=x_bounds - 1.5*width, widths=width,
+                                            patch_artist=True, showmeans=True, showfliers=False,
+                                            meanprops={'marker':'o', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
+            for patch in bp_boot_reg['boxes']:
+                patch.set_facecolor('lightgreen')
+                patch.set_alpha(0.7)
 
         # Poisson Bootstrap Boxplots
-        bp_boot_pois = ax_bounds.boxplot(boot_pois_data, positions=x_bounds - 0.5*width, widths=width,
-                                         patch_artist=True, showmeans=True, showfliers=False,
-                                         meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5})
-        for patch in bp_boot_pois['boxes']:
-            patch.set_facecolor('lightcoral')
-            patch.set_alpha(0.7)
-            
+        if E_boot_pois is not None and E_boot_pois.shape[-1] > 0:
+            bp_boot_pois = ax_bounds.boxplot(boot_pois_data, positions=x_bounds - 0.5*width, widths=width,
+                                             patch_artist=True, showmeans=True, showfliers=False,
+                                             meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5})
+            for patch in bp_boot_pois['boxes']:
+                patch.set_facecolor('lightcoral')
+                patch.set_alpha(0.7)
+                
         # Original SFS Boxplots
         bp_sfs_reg = ax_bounds.boxplot(sfs_reg_data, positions=x_bounds + 0.5*width, widths=width,
                                        patch_artist=True, showmeans=True, showfliers=False,
@@ -75,29 +76,48 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             patch.set_alpha(0.7)
 
         # Hybrid SFS (Bootstrap SFS) Boxplots
-        bp_sfs_bs = ax_bounds.boxplot(sfs_bs_data, positions=x_bounds + 1.5*width, widths=width,
-                                      patch_artist=True, showmeans=True, showfliers=False,
-                                      meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
-        for patch in bp_sfs_bs['boxes']:
-            patch.set_facecolor('lightblue')
-            patch.set_alpha(0.7)
-            
+        if E_sfs_bs_whole is not None and E_sfs_bs_whole.shape[-1] > 0:
+            bp_sfs_bs = ax_bounds.boxplot(sfs_bs_data, positions=x_bounds + 1.5*width, widths=width,
+                                          patch_artist=True, showmeans=True, showfliers=False,
+                                          meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
+            for patch in bp_sfs_bs['boxes']:
+                patch.set_facecolor('lightblue')
+                patch.set_alpha(0.7)
+                
         ax_bounds.plot(x_bounds, E_opt, '*', color='black', markersize=8)
         
-        # Custom legend elements
+        if E_spa is not None:
+            # Determine right-most position
+            has_hybrid = E_sfs_bs_whole is not None and E_sfs_bs_whole.shape[-1] > 0
+            has_pois = E_boot_pois is not None and E_boot_pois.shape[-1] > 0
+            has_reg = E_boot_reg is not None and E_boot_reg.shape[-1] > 0
+            
+            # Logic: If hybrid, it's at +1.5w. Else, SFS is at +0.5w.
+            pos_base = x_bounds + (1.5 * width if has_hybrid else 0.5 * width)
+            pos_spa = pos_base + width
+            ax_bounds.plot(pos_spa, E_spa.flatten() if E_spa.ndim > 0 else E_spa, 's', color='green', markersize=6, zorder=7)
+        
         import matplotlib.patches as mpatches
         import matplotlib.lines as mlines
         legend_elements = [
-            mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='Regular Bootstrap'),
-            mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'),
             mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS'),
-            mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'),
-            mlines.Line2D([0], [0], marker='o', color='w', label='Regular Boot Mean', markerfacecolor='green', markersize=8),
-            mlines.Line2D([0], [0], marker='o', color='w', label='Poisson Boot Mean', markerfacecolor='red', markersize=8),
             mlines.Line2D([0], [0], marker='o', color='w', label='Original SFS Mean', markerfacecolor='purple', markersize=8),
-            mlines.Line2D([0], [0], marker='o', color='w', label='Hybrid SFS Mean', markerfacecolor='blue', markersize=8),
             mlines.Line2D([0], [0], marker='*', color='w', label='Original QP (E_opt)', markerfacecolor='black', markersize=12)
         ]
+        if E_boot_reg is not None and E_boot_reg.shape[-1] > 0:
+            legend_elements.insert(0, mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='Regular Bootstrap'))
+            legend_elements.insert(2, mlines.Line2D([0], [0], marker='o', color='w', label='Regular Boot Mean', markerfacecolor='green', markersize=8))
+        if E_boot_pois is not None and E_boot_pois.shape[-1] > 0:
+            legend_elements.insert(1 if (E_boot_reg is not None and E_boot_reg.shape[-1] > 0) else 0, mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'))
+            legend_elements.insert(4 if (E_boot_reg is not None and E_boot_reg.shape[-1] > 0) else 2, mlines.Line2D([0], [0], marker='o', color='w', label='Poisson Boot Mean', markerfacecolor='red', markersize=8))
+        if E_sfs_bs_whole is not None and E_sfs_bs_whole.shape[-1] > 0:
+            idx1 = 3 if len(legend_elements) > 5 else 2
+            idx2 = len(legend_elements) - 1
+            legend_elements.insert(idx1, mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'))
+            legend_elements.insert(idx2 + 1, mlines.Line2D([0], [0], marker='o', color='w', label='Hybrid SFS Mean', markerfacecolor='blue', markersize=8))
+            
+        if E_spa is not None:
+            legend_elements.append(mlines.Line2D([0], [0], marker='s', color='w', label='SigProfilerAssignment', markerfacecolor='green', markersize=8))
         
         ax_bounds.set_xticks(x_bounds)
         ax_bounds.set_xticklabels(sig_names_filtered, rotation=45, ha='right')
@@ -110,12 +130,19 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         
         # 2. Spatial Inclusion (PCA)
         X_sfs = E_sfs_whole.T
-        X_boot = E_boot_pois.T
-        X_all = np.vstack([X_sfs, X_boot])
+        if E_boot_pois is not None and E_boot_pois.shape[-1] > 0:
+            X_boot = E_boot_pois.T
+            X_all = np.vstack([X_sfs, X_boot])
+        else:
+            X_boot = np.array([])
+            X_all = X_sfs
         pca = PCA(n_components=2)
         X_pca = pca.fit_transform(X_all)
         X_sfs_pca = X_pca[:len(X_sfs)]
-        X_boot_pca = X_pca[len(X_sfs):]
+        if len(X_boot) > 0:
+            X_boot_pca = X_pca[len(X_sfs):]
+        else:
+            X_boot_pca = np.array([])
         
         X_reg_sfs_pca = X_sfs_pca[:n_reg_sfs_whole]
         X_bs_sfs_pca = X_sfs_pca[n_reg_sfs_whole:]
@@ -125,7 +152,8 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             ax_pca.scatter(X_bs_sfs_pca[:, 0], X_bs_sfs_pca[:, 1], c='lightblue', label='Bootstrap SFS Samples', alpha=0.5, s=15, marker='o')
         if len(X_reg_sfs_pca) > 0:
             ax_pca.scatter(X_reg_sfs_pca[:, 0], X_reg_sfs_pca[:, 1], c='lime', label='Regular SFS Samples', alpha=0.8, s=20, marker='D', edgecolors='black', linewidths=0.5)
-        ax_pca.scatter(X_boot_pca[:, 0], X_boot_pca[:, 1], c='red', label='Bootstrap Samples', alpha=0.5, s=15, marker='x')
+        if len(X_boot_pca) > 0:
+            ax_pca.scatter(X_boot_pca[:, 0], X_boot_pca[:, 1], c='red', label='Bootstrap Samples', alpha=0.5, s=15, marker='x')
         ax_pca.set_xlabel(f'PCA1 ({pca.explained_variance_ratio_[0]:.2%} var)')
         ax_pca.set_ylabel(f'PCA2 ({pca.explained_variance_ratio_[1]:.2%} var)')
         ax_pca.set_title(f'Patient {pt}: Spatial Inclusion (PCA)')
@@ -136,11 +164,21 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         
         # 3. Density of the Optimization Landscape
         fig_dens, ax_dens = plt.subplots(figsize=(10, 6))
-        min_err = min(np.min(kl_errs_boot), np.min(kl_errors_sfs))
-        max_err = max(np.max(kl_errs_boot), np.max(kl_errors_sfs))
+        
+        has_boot = kl_errs_boot is not None and len(kl_errs_boot) > 0
+        min_err = np.min(kl_errors_sfs)
+        max_err = np.max(kl_errors_sfs)
+        if has_boot:
+            min_err = min(np.min(kl_errs_boot), min_err)
+            max_err = max(np.max(kl_errs_boot), max_err)
+            
         bins = np.linspace(min_err, max_err, 100)
         
-        hist_boot, _ = np.histogram(kl_errs_boot, bins=bins, density=True)
+        if has_boot:
+            hist_boot, _ = np.histogram(kl_errs_boot, bins=bins, density=True)
+        else:
+            hist_boot = np.zeros(len(bins)-1)
+            
         hist_sfs, _ = np.histogram(kl_errors_sfs, bins=bins, density=True)
         
         bin_widths = np.diff(bins)
@@ -162,12 +200,14 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             ax_dens.bar(bin_centers[mask_sfs_taller], hist_boot[mask_sfs_taller], width=bin_widths[mask_sfs_taller], color='red', alpha=0.9, edgecolor='none', align='center')
 
         legend_patches = [
-            mpatches.Patch(color='red', alpha=0.8, label='Bootstrap (KL Div)'),
             mpatches.Patch(color='lightblue', alpha=0.8, label='SFS (KL Div)')
         ]
+        if has_boot:
+            legend_patches.insert(0, mpatches.Patch(color='red', alpha=0.8, label='Bootstrap (KL Div)'))
 
         ax_dens.axvline(np.mean(kl_errors_sfs), color='blue', linestyle='dashed', linewidth=2, label='SFS Mean Error')
-        ax_dens.axvline(np.mean(kl_errs_boot), color='darkred', linestyle='dotted', linewidth=2, label='Bootstrap Mean Error')
+        if has_boot:
+            ax_dens.axvline(np.mean(kl_errs_boot), color='darkred', linestyle='dotted', linewidth=2, label='Bootstrap Mean Error')
         if len(kl_errors_sfs) > 0:
             ax_dens.axvline(kl_errors_sfs[0], color='lime', linestyle='dashdot', linewidth=2, label='Regular SFS Error')
         
@@ -347,15 +387,25 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             print(f"  Warning: sig_file {sig_file} not found. Skipping P Cosine Similarity plot.")
             
         # 7. Exposure Differences (E_other - E_opt) Data Accumulation
-        diff_boot_reg = E_boot_reg - E_opt[:, np.newaxis]
-        diff_boot_pois = E_boot_pois - E_opt[:, np.newaxis]
+        if E_boot_reg is not None and E_boot_reg.shape[-1] > 0:
+            diff_boot_reg = E_boot_reg - E_opt[:, np.newaxis]
+            global_diff_boot_reg.append(diff_boot_reg)
+        if E_boot_pois is not None and E_boot_pois.shape[-1] > 0:
+            diff_boot_pois = E_boot_pois - E_opt[:, np.newaxis]
+            global_diff_boot_pois.append(diff_boot_pois)
+            
         diff_sfs_reg = E_sfs_reg_whole - E_opt[:, np.newaxis]
-        diff_sfs_bs = E_sfs_bs_whole - E_opt[:, np.newaxis]
-        
-        global_diff_boot_reg.append(diff_boot_reg)
-        global_diff_boot_pois.append(diff_boot_pois)
         global_diff_sfs_reg.append(diff_sfs_reg)
-        global_diff_sfs_bs.append(diff_sfs_bs)
+        
+        if E_sfs_bs_whole is not None and E_sfs_bs_whole.shape[-1] > 0:
+            diff_sfs_bs = E_sfs_bs_whole - E_opt[:, np.newaxis]
+            global_diff_sfs_bs.append(diff_sfs_bs)
+            
+        if E_spa is not None:
+            if not hasattr(visualise_comparison, 'global_diff_spa'):
+                visualise_comparison.global_diff_spa = []
+            diff_spa = E_spa - E_opt
+            visualise_comparison.global_diff_spa.append(diff_spa)
         
         if global_sig_names is None:
             global_sig_names = sig_names_filtered
@@ -429,37 +479,36 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         plt.close()
 
     # After the loop over all patients
-    if len(global_diff_boot_reg) > 0:
+    if len(global_diff_sfs_reg) > 0:
         print("Generating global exposure difference boxplots...")
-        global_diff_boot_reg_concat = np.concatenate(global_diff_boot_reg, axis=1)
-        global_diff_boot_pois_concat = np.concatenate(global_diff_boot_pois, axis=1)
-        global_diff_sfs_reg_concat = np.concatenate(global_diff_sfs_reg, axis=1)
-        global_diff_sfs_bs_concat = np.concatenate(global_diff_sfs_bs, axis=1)
         
         fig_diff_box, ax_diff_box = plt.subplots(figsize=(14, 6))
         num_sigs = len(global_sig_names)
         x_bounds = np.arange(num_sigs)
         width = 0.2
         
-        diff_boot_reg_data = [global_diff_boot_reg_concat[i, :] for i in range(num_sigs)]
-        diff_boot_pois_data = [global_diff_boot_pois_concat[i, :] for i in range(num_sigs)]
+        if len(global_diff_boot_reg) > 0:
+            global_diff_boot_reg_concat = np.concatenate(global_diff_boot_reg, axis=1)
+            diff_boot_reg_data = [global_diff_boot_reg_concat[i, :] for i in range(num_sigs)]
+            bp_diff_boot_reg = ax_diff_box.boxplot(diff_boot_reg_data, positions=x_bounds - 1.5*width, widths=width,
+                                            patch_artist=True, showmeans=True, showfliers=False,
+                                            meanprops={'marker':'o', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
+            for patch in bp_diff_boot_reg['boxes']:
+                patch.set_facecolor('lightgreen')
+                patch.set_alpha(0.7)
+                
+        if len(global_diff_boot_pois) > 0:
+            global_diff_boot_pois_concat = np.concatenate(global_diff_boot_pois, axis=1)
+            diff_boot_pois_data = [global_diff_boot_pois_concat[i, :] for i in range(num_sigs)]
+            bp_diff_boot_pois = ax_diff_box.boxplot(diff_boot_pois_data, positions=x_bounds - 0.5*width, widths=width,
+                                             patch_artist=True, showmeans=True, showfliers=False,
+                                             meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5})
+            for patch in bp_diff_boot_pois['boxes']:
+                patch.set_facecolor('lightcoral')
+                patch.set_alpha(0.7)
+                
+        global_diff_sfs_reg_concat = np.concatenate(global_diff_sfs_reg, axis=1)
         diff_sfs_reg_data = [global_diff_sfs_reg_concat[i, :] for i in range(num_sigs)]
-        diff_sfs_bs_data = [global_diff_sfs_bs_concat[i, :] for i in range(num_sigs)]
-
-        bp_diff_boot_reg = ax_diff_box.boxplot(diff_boot_reg_data, positions=x_bounds - 1.5*width, widths=width,
-                                        patch_artist=True, showmeans=True, showfliers=False,
-                                        meanprops={'marker':'o', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
-        for patch in bp_diff_boot_reg['boxes']:
-            patch.set_facecolor('lightgreen')
-            patch.set_alpha(0.7)
-
-        bp_diff_boot_pois = ax_diff_box.boxplot(diff_boot_pois_data, positions=x_bounds - 0.5*width, widths=width,
-                                         patch_artist=True, showmeans=True, showfliers=False,
-                                         meanprops={'marker':'o', 'markerfacecolor':'red', 'markeredgecolor':'red', 'markersize':5})
-        for patch in bp_diff_boot_pois['boxes']:
-            patch.set_facecolor('lightcoral')
-            patch.set_alpha(0.7)
-            
         bp_diff_sfs_reg = ax_diff_box.boxplot(diff_sfs_reg_data, positions=x_bounds + 0.5*width, widths=width,
                                        patch_artist=True, showmeans=True, showfliers=False,
                                        meanprops={'marker':'o', 'markerfacecolor':'purple', 'markeredgecolor':'purple', 'markersize':5})
@@ -467,13 +516,28 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
             patch.set_facecolor('plum')
             patch.set_alpha(0.7)
 
-        bp_diff_sfs_bs = ax_diff_box.boxplot(diff_sfs_bs_data, positions=x_bounds + 1.5*width, widths=width,
-                                      patch_artist=True, showmeans=True, showfliers=False,
-                                      meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
-        for patch in bp_diff_sfs_bs['boxes']:
-            patch.set_facecolor('lightblue')
-            patch.set_alpha(0.7)
-            
+        if len(global_diff_sfs_bs) > 0:
+            global_diff_sfs_bs_concat = np.concatenate(global_diff_sfs_bs, axis=1)
+            diff_sfs_bs_data = [global_diff_sfs_bs_concat[i, :] for i in range(num_sigs)]
+            bp_diff_sfs_bs = ax_diff_box.boxplot(diff_sfs_bs_data, positions=x_bounds + 1.5*width, widths=width,
+                                          patch_artist=True, showmeans=True, showfliers=False,
+                                          meanprops={'marker':'o', 'markerfacecolor':'blue', 'markeredgecolor':'blue', 'markersize':5})
+            for patch in bp_diff_sfs_bs['boxes']:
+                patch.set_facecolor('lightblue')
+                patch.set_alpha(0.7)
+                
+        if hasattr(visualise_comparison, 'global_diff_spa') and len(visualise_comparison.global_diff_spa) > 0:
+            global_diff_spa_concat = np.column_stack(visualise_comparison.global_diff_spa)
+            diff_spa_data = [global_diff_spa_concat[i, :] for i in range(num_sigs)]
+            has_hybrid = len(global_diff_sfs_bs) > 0
+            pos_spa_diff = x_bounds + (1.5 * width if has_hybrid else 0.5 * width) + width
+            bp_diff_spa = ax_diff_box.boxplot(diff_spa_data, positions=pos_spa_diff, widths=width,
+                                          patch_artist=True, showmeans=True, showfliers=False,
+                                          meanprops={'marker':'s', 'markerfacecolor':'green', 'markeredgecolor':'green', 'markersize':5})
+            for patch in bp_diff_spa['boxes']:
+                patch.set_facecolor('lightgreen')
+                patch.set_alpha(0.7)
+                
         ax_diff_box.axhline(0, color='black', linestyle='--', linewidth=1)
         ax_diff_box.set_xticks(x_bounds)
         ax_diff_box.set_xticklabels(global_sig_names, rotation=45, ha='right')
@@ -482,11 +546,16 @@ def visualise_comparison(patients, sample_file, sig_file="sigconfide/utils/data/
         
         import matplotlib.patches as mpatches
         legend_elements_global = [
-            mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='Regular Bootstrap'),
-            mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'),
-            mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS'),
-            mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)')
+            mpatches.Patch(facecolor='plum', alpha=0.7, edgecolor='black', label='Original SFS')
         ]
+        if len(global_diff_boot_reg) > 0:
+            legend_elements_global.insert(0, mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='Regular Bootstrap'))
+        if len(global_diff_boot_pois) > 0:
+            legend_elements_global.insert(1 if len(global_diff_boot_reg) > 0 else 0, mpatches.Patch(facecolor='lightcoral', alpha=0.7, edgecolor='black', label='Poisson Bootstrap'))
+        if len(global_diff_sfs_bs) > 0:
+            legend_elements_global.append(mpatches.Patch(facecolor='lightblue', alpha=0.7, edgecolor='black', label='Hybrid SFS (Bootstrap SFS)'))
+        if hasattr(visualise_comparison, 'global_diff_spa') and len(visualise_comparison.global_diff_spa) > 0:
+            legend_elements_global.append(mpatches.Patch(facecolor='lightgreen', alpha=0.7, edgecolor='black', label='SigProfilerAssignment'))
         
         ax_diff_box.legend(handles=legend_elements_global, loc='upper right', bbox_to_anchor=(1.15, 1.05))
         plt.tight_layout()
@@ -497,8 +566,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualise computed SFS and Bootstrap signature exposures.")
     parser.add_argument("--patients", nargs="+", default=["PD24196", "PD8609", "PD13608"], help="List of patients")
     parser.add_argument("--sample_file", default="tests/data/tumorBRCA.txt", help="Path to sample file")
-    parser.add_argument("--output_dir", default="comparison_output", help="Output directory containing the computed results")
-    parser.add_argument("--bootstrap_type", choices=["regular", "poisson", "all"], default="all", help="Bootstrap type (legacy, defaults to all)")
+    parser.add_argument("--output_dir", default="brca560", help="Output directory inside comparison_output")
+    parser.add_argument("--bootstrap_type", choices=["regular", "poisson", "all", "none"], default="poisson", help="Bootstrap type")
     parser.add_argument("--sig_file", default="sigconfide/utils/data/COSMIC_v2_SBS_GRCh37.txt", help="Path to signatures file")
     args = parser.parse_args()
     
